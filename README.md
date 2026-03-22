@@ -54,18 +54,18 @@ python3 -m agent.app run-once
 Published images are available at:
 
 ```bash
-ghcr.io/<your-github-user>/k8s-diagnosis-agent:latest
-ghcr.io/<your-github-user>/k8s-diagnosis-agent:sha-<full-commit-sha>
+ghcr.io/bolinz/k8s-diagnosis-agent-app:latest
+ghcr.io/bolinz/k8s-diagnosis-agent-app:sha-<full-commit-sha>
 ```
 
-For cluster deployments, prefer immutable `sha-<full-commit-sha>` tags.
+For cluster deployments, prefer immutable `sha-<full-commit-sha>` tags. If you fork the repository, replace `bolinz` with your own GitHub owner.
 
 ### Deploy to Kubernetes
 
 ```bash
 kubectl apply -k deploy/base
 kubectl set image deployment/k8s-diagnosis-agent \
-  agent=ghcr.io/<your-github-user>/k8s-diagnosis-agent:sha-<full-commit-sha> \
+  agent=ghcr.io/bolinz/k8s-diagnosis-agent-app:sha-<full-commit-sha> \
   -n k8s-diagnosis-system
 kubectl rollout status deployment/k8s-diagnosis-agent -n k8s-diagnosis-system
 ```

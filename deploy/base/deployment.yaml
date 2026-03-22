@@ -21,7 +21,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent
-          image: ghcr.io/<your-github-user>/k8s-diagnosis-agent:latest
+          image: ghcr.io/bolinz/k8s-diagnosis-agent-app:latest
           imagePullPolicy: Always
           args: ["run"]
           ports:

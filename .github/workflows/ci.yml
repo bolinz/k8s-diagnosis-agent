@@ -7,7 +7,7 @@ on:
   pull_request:
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/k8s-diagnosis-agent
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/k8s-diagnosis-agent-app
 
 jobs:
   test:

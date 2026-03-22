@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/<your-github-user>/k8s-diagnosis-agent
+  repository: ghcr.io/bolinz/k8s-diagnosis-agent-app
   tag: latest
 
 openai:
