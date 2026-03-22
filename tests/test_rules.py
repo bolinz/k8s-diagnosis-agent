@@ -48,3 +48,55 @@ def test_fallback_diagnosis_has_specific_image_pull_guidance():
     diagnosis = engine.fallback_diagnosis(trigger)
     assert diagnosis.severity == "critical"
     assert "imagePullSecrets" in diagnosis.recommendations[0]
+
+
+def test_rule_engine_accepts_new_workload_symptoms():
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    findings = engine.findings_from_snapshot(
+        [
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Pod",
+                "symptom": "CreateContainerConfigError",
+                "observed_for_seconds": 1000,
+            },
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Deployment",
+                "symptom": "ProgressDeadlineExceeded",
+                "observed_for_seconds": 1000,
+            },
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Deployment",
+                "symptom": "ReplicaMismatch",
+                "observed_for_seconds": 1000,
+            },
+        ]
+    )
+    assert [item.trigger.symptom for item in findings] == [
+        "CreateContainerConfigError",
+        "ProgressDeadlineExceeded",
+        "ReplicaMismatch",
+    ]
+
+
+def test_fallback_diagnosis_has_specific_mount_guidance():
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    trigger = engine.findings_from_snapshot(
+        [
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Pod",
+                "symptom": "FailedMount",
+                "observed_for_seconds": 1000,
+            }
+        ]
+    )[0].trigger
+    diagnosis = engine.fallback_diagnosis(trigger)
+    assert diagnosis.severity == "critical"
+    assert "PVC" in diagnosis.recommendations[0]

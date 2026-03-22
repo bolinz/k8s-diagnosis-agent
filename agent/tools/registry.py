@@ -74,6 +74,12 @@ class ToolRegistry:
                 handler=lambda args: self.client.get_workload_status(**args),
             ),
             RegisteredTool(
+                name="get_workload_events",
+                description="Get recent Kubernetes events for a workload object such as a Deployment or ReplicaSet.",
+                parameters=workload_defaults,
+                handler=lambda args: self.client.get_workload_events(**args),
+            ),
+            RegisteredTool(
                 name="list_related_pods",
                 description="List pods related to the target workload.",
                 parameters=workload_defaults,
@@ -94,6 +100,34 @@ class ToolRegistry:
                 handler=lambda args: self.client.get_pod_events(**args),
             ),
             RegisteredTool(
+                name="get_pod_spec_summary",
+                description="Inspect a summarized pod spec including images, commands, env refs, volumes, and probes.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "pod_name": {"type": "string"},
+                    },
+                    "required": ["namespace", "pod_name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_pod_spec_summary(**args),
+            ),
+            RegisteredTool(
+                name="get_pod_conditions",
+                description="Inspect pod phase, reason, message, and condition summaries.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "pod_name": {"type": "string"},
+                    },
+                    "required": ["namespace", "pod_name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_pod_conditions(**args),
+            ),
+            RegisteredTool(
                 name="get_container_statuses",
                 description="Get container statuses and restart details for a pod.",
                 parameters={
@@ -106,6 +140,55 @@ class ToolRegistry:
                     "additionalProperties": False,
                 },
                 handler=lambda args: self.client.get_container_statuses(**args),
+            ),
+            RegisteredTool(
+                name="get_deployment_status",
+                description="Inspect deployment replica counts and rollout conditions.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["namespace", "name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_deployment_status(**args),
+            ),
+            RegisteredTool(
+                name="get_replicaset_status",
+                description="Inspect ReplicaSet replica counts, conditions, and owners.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["namespace", "name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_replicaset_status(**args),
+            ),
+            RegisteredTool(
+                name="get_config_refs",
+                description="List referenced Secret and ConfigMap names for a workload without exposing secret values.",
+                parameters=workload_defaults,
+                handler=lambda args: self.client.get_config_refs(**args),
+            ),
+            RegisteredTool(
+                name="get_pvc_status",
+                description="Inspect PVC binding state by claim name or by pod-mounted PVCs.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "pvc_name": {"type": "string"},
+                        "pod_name": {"type": "string"},
+                    },
+                    "required": ["namespace"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_pvc_status(**args),
             ),
             RegisteredTool(
                 name="get_recent_logs",

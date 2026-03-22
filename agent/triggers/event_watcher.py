@@ -33,7 +33,8 @@ def _parse_event_time(event: dict) -> datetime:
 def map_event_to_trigger(cluster: str, event: dict) -> TriggerContext | None:
     event_type = event.get("type", "")
     reason = event.get("reason", "")
-    message = (event.get("message") or "").lower()
+    raw_message = event.get("message", "")
+    message = raw_message.lower()
     involved = event.get("involvedObject") or {}
     namespace = involved.get("namespace") or "default"
     kind = involved.get("kind") or "Pod"
@@ -51,6 +52,24 @@ def map_event_to_trigger(cluster: str, event: dict) -> TriggerContext | None:
         symptom = "Pending"
     elif reason == "Failed" and "probe" in message:
         symptom = "ProbeFailure"
+    elif reason == "FailedMount":
+        symptom = "FailedMount"
+    elif reason in {"FailedCreatePodSandBox", "FailedCreatePodSandbox"}:
+        symptom = "FailedCreatePodSandbox"
+    elif reason == "ProgressDeadlineExceeded":
+        symptom = "ProgressDeadlineExceeded"
+    elif reason == "Evicted":
+        symptom = "Evicted"
+    elif reason == "ContainerCannotRun" or (
+        reason == "Failed" and "container cannot run" in message
+    ):
+        symptom = "ContainerCannotRun"
+    elif reason == "CreateContainerError":
+        symptom = "CreateContainerError"
+    elif reason == "CreateContainerConfigError" or (
+        reason == "Failed" and any(token in message for token in {"configmap", "secret", "not found"})
+    ):
+        symptom = "CreateContainerConfigError"
     elif "imagepullbackoff" in message or reason == "ImagePullBackOff":
         symptom = "ImagePullBackOff"
     elif "errimagepull" in message or reason == "ErrImagePull":
@@ -71,7 +90,7 @@ def map_event_to_trigger(cluster: str, event: dict) -> TriggerContext | None:
         raw_signal={
             "eventType": event_type,
             "reason": reason,
-            "message": event.get("message", ""),
+            "message": raw_message,
             "involvedObject": involved,
             "timestamp": _parse_event_time(event).astimezone(timezone.utc).isoformat(),
         },

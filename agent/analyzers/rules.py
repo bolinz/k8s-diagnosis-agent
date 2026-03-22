@@ -12,6 +12,14 @@ SUPPORTED_SYMPTOMS = {
     "OOMKilled",
     "Pending",
     "ProbeFailure",
+    "CreateContainerConfigError",
+    "CreateContainerError",
+    "ContainerCannotRun",
+    "FailedMount",
+    "FailedCreatePodSandbox",
+    "Evicted",
+    "ProgressDeadlineExceeded",
+    "ReplicaMismatch",
     "NodeNotReadyImpact",
 }
 
@@ -97,6 +105,61 @@ class RuleEngine:
             probable_causes = ["Health probes fail before the service is ready"]
             recommendations = [
                 "Relax initial delay and timeout values or fix the health endpoint"
+            ]
+        elif symptom == "CreateContainerConfigError":
+            severity = "critical"
+            probable_causes = [
+                "A referenced Secret, ConfigMap, env source, or volume configuration is invalid or missing"
+            ]
+            recommendations = [
+                "Verify referenced Secret and ConfigMap names, envFrom entries, and projected volume sources"
+            ]
+        elif symptom in {"CreateContainerError", "ContainerCannotRun"}:
+            severity = "critical"
+            probable_causes = [
+                "The container entrypoint, command, permissions, or runtime arguments are invalid"
+            ]
+            recommendations = [
+                "Inspect container command, args, image contents, and recent container status reasons"
+            ]
+        elif symptom == "FailedMount":
+            severity = "critical"
+            probable_causes = [
+                "A PVC, Secret, ConfigMap, or projected volume cannot be mounted into the pod"
+            ]
+            recommendations = [
+                "Inspect pod events, PVC binding state, and referenced volume sources"
+            ]
+        elif symptom == "FailedCreatePodSandbox":
+            severity = "critical"
+            probable_causes = [
+                "The cluster runtime failed to create the pod sandbox before containers could start"
+            ]
+            recommendations = [
+                "Review pod events and node runtime messages for sandbox or CNI startup failures"
+            ]
+        elif symptom == "Evicted":
+            severity = "critical"
+            probable_causes = [
+                "The pod was evicted because the node was under memory, disk, or PID pressure"
+            ]
+            recommendations = [
+                "Review node pressure signals and adjust requests, limits, or pod placement"
+            ]
+        elif symptom == "ProgressDeadlineExceeded":
+            severity = "critical"
+            probable_causes = [
+                "The deployment rollout is stalled because new replicas are not becoming ready"
+            ]
+            recommendations = [
+                "Inspect deployment conditions, related pod events, probes, and image or dependency failures"
+            ]
+        elif symptom == "ReplicaMismatch":
+            probable_causes = [
+                "Desired and available replicas diverge because rollout or readiness is not completing"
+            ]
+            recommendations = [
+                "Inspect deployment status, unavailable replicas, and related pod conditions"
             ]
         else:
             probable_causes = [

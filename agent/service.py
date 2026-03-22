@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 from agent.analyzers.rules import RuleEngine
 from agent.config.settings import Settings
@@ -46,6 +47,8 @@ class AgentService:
         return self.process_trigger(trigger)
 
     def process_trigger(self, trigger: TriggerContext) -> dict:
+        trigger = self._normalize_trigger(trigger)
+        trigger = self._augment_trigger_signal(trigger)
         registry = ToolRegistry(self.client, trigger)
         diagnosis = self._ensure_complete_diagnosis(
             trigger, self.codex_agent.diagnose(trigger, registry)
@@ -146,6 +149,8 @@ class AgentService:
         metadata = report.get("metadata", {})
         spec = report.get("spec", {})
         status = report.get("status", {})
+        spec = self._normalize_report_spec(spec, status.get("rawSignal", {}))
+        status = self._normalize_report_status(status)
         workload = spec.get("workloadRef", {})
         return {
             "name": metadata.get("name", ""),
@@ -194,6 +199,93 @@ class AgentService:
             or not diagnosis.recommendations,
         )
 
+    def _normalize_report_spec(self, spec: dict[str, Any], raw_signal: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(spec)
+        workload = dict(normalized.get("workloadRef", {}))
+        involved = raw_signal.get("involvedObject", {}) if isinstance(raw_signal, dict) else {}
+        kind = workload.get("kind") or involved.get("kind") or "Pod"
+        name = workload.get("name") or involved.get("name") or ""
+        namespace = (
+            normalized.get("namespace")
+            or involved.get("namespace")
+            or "default"
+        )
+        normalized["cluster"] = normalized.get("cluster") or self.settings.cluster_name
+        normalized["namespace"] = namespace
+        normalized["workloadRef"] = {
+            "kind": kind,
+            "name": name,
+        }
+        return normalized
+
+    def _normalize_report_status(self, status: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(status)
+        model_info = normalized.get("modelInfo")
+        if not isinstance(model_info, dict):
+            model_info = {}
+        normalized["modelInfo"] = {
+            "name": model_info.get("name") or self.settings.openai_model,
+            "fallback": bool(model_info.get("fallback", False)),
+        }
+        raw_signal = normalized.get("rawSignal")
+        normalized["rawSignal"] = raw_signal if isinstance(raw_signal, dict) else {}
+        return normalized
+
+    def _augment_trigger_signal(self, trigger: TriggerContext) -> TriggerContext:
+        raw_signal = dict(trigger.raw_signal)
+        try:
+            if trigger.workload.kind.lower() == "pod" and trigger.workload.name:
+                pod_conditions = self.client.get_pod_conditions(
+                    namespace=trigger.workload.namespace,
+                    pod_name=trigger.workload.name,
+                )
+                raw_signal["podPhase"] = raw_signal.get("podPhase") or pod_conditions.get("phase")
+                raw_signal["podReason"] = raw_signal.get("podReason") or pod_conditions.get("reason")
+                statuses = self.client.get_container_statuses(
+                    namespace=trigger.workload.namespace,
+                    pod_name=trigger.workload.name,
+                )
+                for item in statuses.get("items", []):
+                    state = item.get("state", {})
+                    waiting = state.get("waiting", {})
+                    terminated = state.get("terminated", {})
+                    reason = waiting.get("reason") or terminated.get("reason")
+                    if reason:
+                        raw_signal["containerReason"] = raw_signal.get("containerReason") or reason
+                        break
+                if trigger.symptom == "FailedMount":
+                    pvc_status = self.client.get_pvc_status(
+                        namespace=trigger.workload.namespace,
+                        pod_name=trigger.workload.name,
+                    )
+                    items = pvc_status.get("items", [])
+                    if items:
+                        raw_signal["pvcPhase"] = raw_signal.get("pvcPhase") or items[0].get("phase")
+            elif trigger.workload.kind.lower() == "deployment" and trigger.workload.name:
+                deployment_status = self.client.get_deployment_status(
+                    namespace=trigger.workload.namespace,
+                    name=trigger.workload.name,
+                )
+                conditions = deployment_status.get("conditions", [])
+                if conditions:
+                    first_condition = conditions[0]
+                    raw_signal["deploymentCondition"] = (
+                        raw_signal.get("deploymentCondition")
+                        or first_condition.get("reason")
+                        or first_condition.get("type")
+                    )
+        except Exception:
+            return trigger
+        return TriggerContext(
+            source=trigger.source,
+            cluster=trigger.cluster,
+            workload=trigger.workload,
+            symptom=trigger.symptom,
+            observed_for_seconds=trigger.observed_for_seconds,
+            trigger_at=trigger.trigger_at,
+            raw_signal=raw_signal,
+        )
+
     def _fallback_summary(self, trigger: TriggerContext) -> str:
         summary = (
             f"Detected {trigger.symptom} for "
@@ -217,30 +309,90 @@ class AgentService:
             value = trigger.raw_signal.get(key)
             if value:
                 evidence.append(f"{key}={value}")
+        for key in ("podPhase", "podReason", "containerReason", "deploymentCondition", "pvcPhase"):
+            value = trigger.raw_signal.get(key)
+            if value:
+                evidence.append(f"{key}={value}")
         return evidence
+
+    def _normalize_trigger(self, trigger: TriggerContext) -> TriggerContext:
+        raw_signal = self._normalize_event_signal(trigger)
+        involved = raw_signal.get("involvedObject", {}) if trigger.source == "event" else {}
+        workload_name = trigger.workload.name or involved.get("name") or ""
+        workload_kind = trigger.workload.kind or involved.get("kind") or "Pod"
+        workload_namespace = (
+            trigger.workload.namespace
+            or involved.get("namespace")
+            or "default"
+        )
+        return TriggerContext(
+            source=trigger.source,
+            cluster=trigger.cluster or self.settings.cluster_name,
+            workload=WorkloadRef(
+                kind=workload_kind,
+                namespace=workload_namespace,
+                name=workload_name,
+            ),
+            symptom=trigger.symptom,
+            observed_for_seconds=trigger.observed_for_seconds,
+            trigger_at=trigger.trigger_at,
+            raw_signal=raw_signal,
+        )
+
+    def _normalize_event_signal(self, trigger: TriggerContext) -> dict[str, Any]:
+        raw_signal = dict(trigger.raw_signal) if isinstance(trigger.raw_signal, dict) else {}
+        if trigger.source != "event":
+            return raw_signal
+        involved = raw_signal.get("involvedObject")
+        if not isinstance(involved, dict):
+            involved = {}
+        involved = {
+            "kind": involved.get("kind") or trigger.workload.kind or "Pod",
+            "name": involved.get("name") or trigger.workload.name or "",
+            "namespace": involved.get("namespace") or trigger.workload.namespace or "default",
+        }
+        raw_signal["involvedObject"] = involved
+        if trigger.raw_signal.get("eventType"):
+            raw_signal["eventType"] = trigger.raw_signal.get("eventType")
+        if trigger.raw_signal.get("reason"):
+            raw_signal["reason"] = trigger.raw_signal.get("reason")
+        if trigger.raw_signal.get("message"):
+            raw_signal["message"] = trigger.raw_signal.get("message")
+        raw_signal["timestamp"] = raw_signal.get("timestamp") or trigger.trigger_at.astimezone(timezone.utc).isoformat()
+        return raw_signal
 
     def _trigger_from_report(self, report: dict) -> TriggerContext:
         spec = report.get("spec", {})
         workload = spec.get("workloadRef", {})
         status = report.get("status", {})
-        return TriggerContext(
+        return self._normalize_trigger(TriggerContext(
             source=spec.get("source", "scheduled"),
             cluster=spec.get("cluster", self.settings.cluster_name),
             workload=WorkloadRef(
                 kind=workload.get("kind", "Pod"),
                 namespace=spec.get("namespace", "default"),
-                name=workload.get("name", "unknown"),
+                name=workload.get("name", ""),
             ),
             symptom=spec.get("symptom", "Pending"),
             observed_for_seconds=int(spec.get("observedFor", 0)),
             raw_signal=status.get("rawSignal", {}),
-        )
+        ))
 
     def _raw_signal_summary(self, raw_signal: dict) -> dict:
         if not isinstance(raw_signal, dict):
             return {}
         summary = {}
-        for key in ("eventType", "reason", "message", "timestamp"):
+        for key in (
+            "eventType",
+            "reason",
+            "message",
+            "timestamp",
+            "podPhase",
+            "podReason",
+            "containerReason",
+            "deploymentCondition",
+            "pvcPhase",
+        ):
             value = raw_signal.get(key)
             if value:
                 summary[key] = value
@@ -279,5 +431,4 @@ def build_runtime_service(settings: Settings) -> AgentService:
         codex_agent=codex_agent,
         report_writer=writer,
     )
-    service.backfill_incomplete_reports()
     return service
