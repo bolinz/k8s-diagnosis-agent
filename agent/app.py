@@ -30,6 +30,8 @@ def main() -> None:
     event_watcher = EventWatcher(
         stream_factory=service.client.watch_events,
         cluster_name=settings.cluster_name,
+        report_namespace=settings.report_namespace,
+        workload_name=settings.workload_name,
         on_trigger=service.process_event_trigger,
     )
     event_watcher.start()

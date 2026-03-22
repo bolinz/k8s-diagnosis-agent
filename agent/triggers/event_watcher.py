@@ -38,7 +38,10 @@ def map_event_to_trigger(cluster: str, event: dict) -> TriggerContext | None:
     involved = event.get("involvedObject") or {}
     namespace = involved.get("namespace") or "default"
     kind = involved.get("kind") or "Pod"
-    name = involved.get("name") or "unknown"
+    name = involved.get("name") or ""
+
+    if not name:
+        return None
 
     if reason in IGNORED_REASONS:
         return None
@@ -102,13 +105,30 @@ class EventWatcher(threading.Thread):
         self,
         stream_factory: Callable[[], object],
         cluster_name: str,
+        report_namespace: str,
+        workload_name: str,
         on_trigger: Callable[[TriggerContext], None],
     ) -> None:
         super().__init__(daemon=True)
         self.stream_factory = stream_factory
         self.cluster_name = cluster_name
+        self.report_namespace = report_namespace
+        self.workload_name = workload_name
         self.on_trigger = on_trigger
         self._stop_event = threading.Event()
+
+    def _should_ignore_event(self, event: dict) -> bool:
+        involved = event.get("involvedObject") or {}
+        namespace = involved.get("namespace") or ""
+        kind = involved.get("kind") or ""
+        name = involved.get("name") or ""
+        if not name:
+            return True
+        if namespace != self.report_namespace:
+            return False
+        if name == self.workload_name or name.startswith(f"{self.workload_name}-"):
+            return kind in {"Deployment", "ReplicaSet", "Pod"}
+        return False
 
     def run(self) -> None:
         while not self._stop_event.is_set():
@@ -119,6 +139,8 @@ class EventWatcher(threading.Thread):
                         break
                     obj = item.get("object", item)
                     event_dict = obj.to_dict() if hasattr(obj, "to_dict") else obj
+                    if self._should_ignore_event(event_dict):
+                        continue
                     trigger = map_event_to_trigger(self.cluster_name, event_dict)
                     if trigger is not None:
                         self.on_trigger(trigger)

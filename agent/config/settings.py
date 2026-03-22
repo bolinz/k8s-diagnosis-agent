@@ -26,6 +26,7 @@ class Settings:
     api_base_url: str
     diagnosis_name_prefix: str
     event_dedupe_window_seconds: int
+    workload_name: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -55,4 +56,5 @@ class Settings:
             event_dedupe_window_seconds=_int_env(
                 "K8S_DIAGNOSIS_EVENT_DEDUPE_WINDOW_SECONDS", 300
             ),
+            workload_name=os.getenv("K8S_DIAGNOSIS_WORKLOAD_NAME", "k8s-diagnosis-agent"),
         )
