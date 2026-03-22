@@ -143,7 +143,15 @@ class AgentService:
 
     def _collect_findings(self) -> list[PendingFinding]:
         engine = self.codex_agent.rule_engine
-        return engine.findings_from_snapshot(self.client.list_anomaly_snapshot())
+        findings = engine.findings_from_snapshot(self.client.list_anomaly_snapshot())
+        return [
+            finding
+            for finding in findings
+            if not self._is_self_workload(
+                finding.trigger.workload.namespace,
+                finding.trigger.workload.name,
+            )
+        ]
 
     def _normalize_report(self, report: dict) -> dict:
         metadata = report.get("metadata", {})
@@ -175,6 +183,14 @@ class AgentService:
             "modelInfo": status.get("modelInfo", {}),
             "rawSignal": self._raw_signal_summary(status.get("rawSignal", {})),
         }
+
+    def _is_self_workload(self, namespace: str, name: str) -> bool:
+        if namespace != self.settings.report_namespace:
+            return False
+        return bool(name) and (
+            name == self.settings.workload_name
+            or name.startswith(f"{self.settings.workload_name}-")
+        )
 
     def _ensure_complete_diagnosis(
         self,
