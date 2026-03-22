@@ -842,6 +842,57 @@ def test_process_trigger_enriches_raw_signal_for_deployment_symptoms():
     assert report["status"]["rawSignal"]["deploymentCondition"] == "ProgressDeadlineExceeded"
 
 
+def test_scan_once_filters_agent_self_findings():
+    class SelfFindingClient(FakeKubernetesClient):
+        def list_anomaly_snapshot(self):
+            return [
+                {
+                    "namespace": "k8s-diagnosis-system",
+                    "name": "k8s-diagnosis-agent-abc123",
+                    "kind": "Pod",
+                    "symptom": "Pending",
+                    "observed_for_seconds": 1800,
+                },
+                {
+                    "namespace": "payments",
+                    "name": "checkout-abc",
+                    "kind": "Pod",
+                    "symptom": "CrashLoopBackOff",
+                    "observed_for_seconds": 1800,
+                },
+            ]
+
+    service = AgentService(
+        settings=build_settings(),
+        client=SelfFindingClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient(
+                [
+                    {
+                        "output_text": json.dumps(
+                            {
+                                "summary": "Checkout pod crashes because DATABASE_URL is missing.",
+                                "severity": "critical",
+                                "probableCauses": ["Required database environment variable is absent."],
+                                "evidence": ["Container logs contain missing DATABASE_URL."],
+                                "recommendations": ["Restore secret wiring."],
+                                "confidence": 0.93,
+                            }
+                        )
+                    }
+                ]
+            ),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+    )
+    reports = service.scan_once()
+    assert len(reports) == 1
+    assert reports[0]["spec"]["workloadRef"]["name"] == "checkout-abc"
+
+
 def engine_result():
     from agent.models import DiagnosisResult
 
