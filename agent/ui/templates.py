@@ -228,6 +228,40 @@ INDEX_HTML = """<!doctype html>
       return ["critical", "warning", "info"].includes(value) ? value : "";
     }
 
+    function hasValue(value) {
+      if (value === null || value === undefined) return false;
+      if (typeof value === "string") return value.trim() !== "";
+      return true;
+    }
+
+    function metadataLine(label, value) {
+      if (!hasValue(value)) return "";
+      return `<li>${escapeHtml(label)}: ${escapeHtml(value)}</li>`;
+    }
+
+    function workloadLabel(item) {
+      if (hasValue(item.workload?.kind) && hasValue(item.workload?.name)) {
+        return `${escapeHtml(item.workload.kind)}/${escapeHtml(item.workload.name)}`;
+      }
+      if (hasValue(item.symptom)) {
+        return escapeHtml(item.symptom);
+      }
+      return escapeHtml(item.name || "DiagnosisReport");
+    }
+
+    function keySignals(item) {
+      const signals = [
+        item.rawSignal?.reason ? `event reason=${item.rawSignal.reason}` : "",
+        item.rawSignal?.podPhase ? `pod phase=${item.rawSignal.podPhase}` : "",
+        item.rawSignal?.podReason ? `pod reason=${item.rawSignal.podReason}` : "",
+        item.rawSignal?.containerReason ? `container reason=${item.rawSignal.containerReason}` : "",
+        item.rawSignal?.deploymentCondition ? `deployment condition=${item.rawSignal.deploymentCondition}` : "",
+        item.rawSignal?.pvcPhase ? `pvc phase=${item.rawSignal.pvcPhase}` : "",
+      ].filter(Boolean);
+      if (signals.length) return signals;
+      return (item.evidence || []).slice(0, 3);
+    }
+
     function escapeHtml(value) {
       return String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -284,11 +318,11 @@ INDEX_HTML = """<!doctype html>
             <span>${escapeHtml(item.namespace)}</span>
             <span>${escapeHtml(item.symptom)}</span>
           </div>
-          <h3>${escapeHtml(item.workload.kind)}/${escapeHtml(item.workload.name)}</h3>
+          <h3>${workloadLabel(item)}</h3>
           <div>${escapeHtml(item.summary)}</div>
           <div class="meta" style="margin-top: 8px;">
-            <span>trigger ${escapeHtml(item.triggerAt || "unknown")}</span>
-            <span>${escapeHtml(item.lastAnalyzedAt || "unknown")}</span>
+            ${hasValue(item.triggerAt) ? `<span>trigger ${escapeHtml(item.triggerAt)}</span>` : ""}
+            ${hasValue(item.lastAnalyzedAt) ? `<span>${escapeHtml(item.lastAnalyzedAt)}</span>` : ""}
           </div>
         </div>
       `).join("");
@@ -309,15 +343,52 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       const item = await response.json();
+      const metadata = [
+        metadataLine("Trigger at", item.triggerAt),
+        metadataLine("Last analyzed", item.lastAnalyzedAt),
+        metadataLine("Trigger source", item.source),
+        metadataLine("Observed for", hasValue(item.observedFor) ? `${item.observedFor} seconds` : ""),
+        metadataLine("Cluster", item.cluster),
+        metadataLine("Analysis version", item.analysisVersion),
+        metadataLine("Model", item.modelInfo?.name),
+        metadataLine("Fallback", item.modelInfo ? String(item.modelInfo.fallback) : ""),
+      ];
+      if (item.source === "event") {
+        metadata.push(
+          metadataLine("Event reason", item.rawSignal?.reason),
+          metadataLine("Event message", item.rawSignal?.message),
+          metadataLine("Event time", item.rawSignal?.timestamp),
+        );
+      }
+      const metadataHtml = metadata.filter(Boolean).join("");
+      const context = [
+        metadataLine("Kind", item.workload?.kind),
+        metadataLine("Name", item.workload?.name),
+        metadataLine("Namespace", item.namespace),
+        metadataLine("Symptom", item.symptom),
+        metadataLine("Source", item.source),
+      ].filter(Boolean).join("");
+      const signalItems = keySignals(item)
+        .filter(Boolean)
+        .map((signal) => `<li>${escapeHtml(signal)}</li>`)
+        .join("");
       detailEl.innerHTML = `
-        <h2>${escapeHtml(item.workload.kind)}/${escapeHtml(item.workload.name)}</h2>
+        <h2>${workloadLabel(item)}</h2>
         <p class="summary">${escapeHtml(item.summary)}</p>
         <div class="meta">
           <span class="badge ${severityClass(item.severity)}">${escapeHtml(item.severity)}</span>
           <span>${escapeHtml(item.namespace)}</span>
           <span>${escapeHtml(item.symptom)}</span>
           <span>confidence ${escapeHtml(item.confidence)}</span>
-          <span>cluster ${escapeHtml(item.cluster || "unknown")}</span>
+          ${hasValue(item.cluster) ? `<span>cluster ${escapeHtml(item.cluster)}</span>` : ""}
+        </div>
+        <div class="section">
+          <h3>Workload Context</h3>
+          <ul>${context}</ul>
+        </div>
+        <div class="section">
+          <h3>Key Signals</h3>
+          <ul>${signalItems}</ul>
         </div>
         <div class="section">
           <h3>Probable Causes</h3>
@@ -334,17 +405,7 @@ INDEX_HTML = """<!doctype html>
         <div class="section">
           <h3>Metadata</h3>
           <ul>
-            <li>Trigger at: ${escapeHtml(item.triggerAt || "unknown")}</li>
-            <li>Last analyzed: ${escapeHtml(item.lastAnalyzedAt || "unknown")}</li>
-            <li>Trigger source: ${escapeHtml(item.source || "unknown")}</li>
-            <li>Observed for: ${escapeHtml(item.observedFor || "unknown")} seconds</li>
-            <li>Cluster: ${escapeHtml(item.cluster || "unknown")}</li>
-            <li>Analysis version: ${escapeHtml(item.analysisVersion || "unknown")}</li>
-            <li>Model: ${escapeHtml(item.modelInfo?.name || "unknown")}</li>
-            <li>Fallback: ${escapeHtml(String(item.modelInfo?.fallback ?? false))}</li>
-            <li>Event reason: ${escapeHtml(item.rawSignal?.reason || "n/a")}</li>
-            <li>Event message: ${escapeHtml(item.rawSignal?.message || "n/a")}</li>
-            <li>Event time: ${escapeHtml(item.rawSignal?.timestamp || "n/a")}</li>
+            ${metadataHtml}
           </ul>
         </div>
       `;

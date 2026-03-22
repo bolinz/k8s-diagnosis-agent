@@ -12,13 +12,39 @@ class KubernetesReadClient(Protocol):
     def get_workload_status(self, namespace: str, kind: str, name: str) -> dict:
         ...
 
+    def get_workload_events(self, namespace: str, kind: str, name: str) -> dict:
+        ...
+
     def list_related_pods(self, namespace: str, kind: str, name: str) -> dict:
         ...
 
     def get_pod_events(self, namespace: str, pod_name: str) -> dict:
         ...
 
+    def get_pod_spec_summary(self, namespace: str, pod_name: str) -> dict:
+        ...
+
+    def get_pod_conditions(self, namespace: str, pod_name: str) -> dict:
+        ...
+
     def get_container_statuses(self, namespace: str, pod_name: str) -> dict:
+        ...
+
+    def get_deployment_status(self, namespace: str, name: str) -> dict:
+        ...
+
+    def get_replicaset_status(self, namespace: str, name: str) -> dict:
+        ...
+
+    def get_config_refs(self, namespace: str, kind: str, name: str) -> dict:
+        ...
+
+    def get_pvc_status(
+        self,
+        namespace: str,
+        pvc_name: str | None = None,
+        pod_name: str | None = None,
+    ) -> dict:
         ...
 
     def get_recent_logs(self, namespace: str, pod_name: str, container: str | None = None) -> dict:

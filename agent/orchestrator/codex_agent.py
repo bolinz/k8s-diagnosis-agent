@@ -16,7 +16,8 @@ Return final output as strict JSON with fields:
 summary, severity, probableCauses, evidence, recommendations, confidence.
 Confidence must be a float between 0 and 1.
 Evidence and recommendations must be short, concrete strings.
-If evidence is insufficient, say so explicitly in summary and lower confidence."""
+If evidence is insufficient, say so explicitly in summary and lower confidence.
+Prefer the recommended tool sequence for the current symptom before using unrelated tools."""
 
 
 @dataclass
@@ -86,6 +87,7 @@ class CodexDiagnosisAgent:
 
     def _build_user_prompt(self, trigger: TriggerContext) -> str:
         signal_json = json.dumps(trigger.raw_signal, ensure_ascii=True, sort_keys=True)
+        preferred_tools = ", ".join(self._preferred_tool_sequence(trigger.symptom))
         return (
             f"Diagnose a Kubernetes issue.\n"
             f"Cluster: {trigger.cluster}\n"
@@ -95,8 +97,39 @@ class CodexDiagnosisAgent:
             f"Symptom: {trigger.symptom}\n"
             f"Observed for seconds: {trigger.observed_for_seconds}\n"
             f"Raw signal: {signal_json[: self.max_input_bytes]}\n"
+            f"Preferred tool order: {preferred_tools}\n"
             "Use tools to gather evidence before concluding."
         )
+
+    def _preferred_tool_sequence(self, symptom: str) -> list[str]:
+        if symptom in {"CrashLoopBackOff", "ContainerCannotRun", "CreateContainerError"}:
+            return [
+                "get_container_statuses",
+                "get_recent_logs",
+                "get_pod_spec_summary",
+                "get_pod_events",
+            ]
+        if symptom in {"Pending", "FailedMount", "CreateContainerConfigError"}:
+            return [
+                "get_pod_conditions",
+                "get_pod_events",
+                "get_namespace_quotas",
+                "get_pvc_status",
+                "get_config_refs",
+            ]
+        if symptom in {"ProgressDeadlineExceeded", "ReplicaMismatch"}:
+            return [
+                "get_deployment_status",
+                "get_workload_events",
+                "list_related_pods",
+                "get_pod_conditions",
+            ]
+        return [
+            "get_workload_status",
+            "list_related_pods",
+            "get_pod_events",
+            "search_similar_reports",
+        ]
 
     def _parse_final_response(
         self,

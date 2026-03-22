@@ -14,7 +14,10 @@ def test_ui_template_contains_expected_sections():
     assert "Probable Causes" in INDEX_HTML
     assert 'id="filter-namespace"' in INDEX_HTML
     assert "Fix Suggestions" in INDEX_HTML
-    assert "Trigger at:" in INDEX_HTML
+    assert "metadataLine(" in INDEX_HTML
+    assert "workloadLabel(" in INDEX_HTML
+    assert "Workload Context" in INDEX_HTML
+    assert "Key Signals" in INDEX_HTML
 
 
 def test_service_api_shape_matches_ui_expectations():
@@ -46,3 +49,48 @@ def test_service_api_shape_matches_ui_expectations():
     assert detail["probableCauses"]
     assert detail["recommendations"]
     assert detail["rawSignal"]["reason"] == "BackOff"
+    assert detail["rawSignal"]["containerReason"] == "CrashLoopBackOff"
+
+
+def test_service_does_not_emit_unknown_or_na_placeholders():
+    class SparseClient(FakeKubernetesClient):
+        def list_reports(self):
+            return [
+                {
+                    "metadata": {"name": "diagnosis-sparse"},
+                    "spec": {
+                        "source": "scheduled",
+                        "cluster": "",
+                        "namespace": "payments",
+                        "symptom": "Pending",
+                        "observedFor": 0,
+                        "triggerAt": "",
+                        "workloadRef": {"kind": "Pod", "name": ""},
+                    },
+                    "status": {
+                        "severity": "warning",
+                        "summary": "Pending workload detected.",
+                        "probableCauses": ["Capacity unavailable."],
+                        "evidence": ["Scheduler is blocked."],
+                        "recommendations": ["Inspect scheduling constraints."],
+                        "confidence": 0.5,
+                        "analysisVersion": "0.1.0",
+                    },
+                }
+            ]
+
+    service = AgentService(
+        settings=build_settings(),
+        client=SparseClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient([]),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+    )
+    item = service.list_reports()[0]
+    assert item["workload"]["name"] == ""
+    assert item["modelInfo"]["name"] == "gpt-5-codex"
+    assert item["rawSignal"] == {}

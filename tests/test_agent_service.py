@@ -41,6 +41,10 @@ class FakeKubernetesClient:
         self.calls.append(("get_workload_status", namespace, kind, name))
         return {"namespace": namespace, "kind": kind, "name": name, "phase": "Running"}
 
+    def get_workload_events(self, namespace, kind, name):
+        self.calls.append(("get_workload_events", namespace, kind, name))
+        return {"items": [{"reason": "ProgressDeadlineExceeded", "message": "Deployment exceeded its progress deadline"}]}
+
     def list_related_pods(self, namespace, kind, name):
         self.calls.append(("list_related_pods", namespace, kind, name))
         return {"items": [{"metadata": {"name": name}}]}
@@ -49,9 +53,81 @@ class FakeKubernetesClient:
         self.calls.append(("get_pod_events", namespace, pod_name))
         return {"items": [{"reason": "BackOff", "message": "Back-off restarting failed container"}]}
 
+    def get_pod_spec_summary(self, namespace, pod_name):
+        self.calls.append(("get_pod_spec_summary", namespace, pod_name))
+        return {
+            "containers": [
+                {
+                    "name": "checkout",
+                    "image": "example/checkout:v1",
+                    "command": ["/app/server"],
+                    "args": ["--port=8080"],
+                    "envFrom": [{"secretRef": {"name": "checkout-env"}}],
+                }
+            ],
+            "volumes": [
+                {"name": "config", "configMap": {"name": "checkout-config"}},
+                {"name": "data", "persistentVolumeClaim": {"claimName": "checkout-pvc"}},
+            ],
+            "serviceAccountName": "default",
+            "nodeName": "node-a",
+        }
+
+    def get_pod_conditions(self, namespace, pod_name):
+        self.calls.append(("get_pod_conditions", namespace, pod_name))
+        return {
+            "phase": "Pending",
+            "reason": "Unschedulable",
+            "message": "0/3 nodes are available",
+            "conditions": [{"type": "PodScheduled", "status": "False", "reason": "Unschedulable"}],
+        }
+
     def get_container_statuses(self, namespace, pod_name):
         self.calls.append(("get_container_statuses", namespace, pod_name))
         return {"items": [{"restart_count": 12, "state": {"waiting": {"reason": "CrashLoopBackOff"}}}]}
+
+    def get_deployment_status(self, namespace, name):
+        self.calls.append(("get_deployment_status", namespace, name))
+        return {
+            "replicas": 3,
+            "updatedReplicas": 1,
+            "availableReplicas": 1,
+            "unavailableReplicas": 2,
+            "conditions": [{"type": "Progressing", "reason": "ProgressDeadlineExceeded"}],
+        }
+
+    def get_replicaset_status(self, namespace, name):
+        self.calls.append(("get_replicaset_status", namespace, name))
+        return {
+            "replicas": 3,
+            "readyReplicas": 1,
+            "availableReplicas": 1,
+            "conditions": [{"type": "ReplicaFailure", "reason": "FailedCreate"}],
+            "ownerReferences": [{"kind": "Deployment", "name": "checkout"}],
+        }
+
+    def get_config_refs(self, namespace, kind, name):
+        self.calls.append(("get_config_refs", namespace, kind, name))
+        return {
+            "items": [
+                {"type": "Secret", "name": "checkout-env", "namespace": namespace, "optional": False},
+                {"type": "ConfigMap", "name": "checkout-config", "namespace": namespace, "optional": False},
+            ]
+        }
+
+    def get_pvc_status(self, namespace, pvc_name=None, pod_name=None):
+        self.calls.append(("get_pvc_status", namespace, pvc_name, pod_name))
+        return {
+            "items": [
+                {
+                    "name": pvc_name or "checkout-pvc",
+                    "phase": "Pending",
+                    "storageClassName": "fast",
+                    "capacity": {"storage": "10Gi"},
+                    "volumeName": "",
+                }
+            ]
+        }
 
     def get_recent_logs(self, namespace, pod_name, container=None):
         self.calls.append(("get_recent_logs", namespace, pod_name, container))
@@ -94,7 +170,13 @@ class FakeKubernetesClient:
                     "confidence": 0.93,
                     "analysisVersion": "0.1.0",
                     "modelInfo": {"name": "gpt-5-codex", "fallback": False},
-                    "rawSignal": {"reason": "BackOff", "message": "restart", "timestamp": "2026-03-22T05:00:00+00:00"},
+                    "rawSignal": {
+                        "reason": "BackOff",
+                        "message": "restart",
+                        "timestamp": "2026-03-22T05:00:00+00:00",
+                        "podPhase": "Running",
+                        "containerReason": "CrashLoopBackOff",
+                    },
                     "lastAnalyzedAt": "2026-03-22T05:00:00+00:00",
                 },
             }
@@ -143,6 +225,33 @@ def test_tool_registry_executes_registered_tools():
     )
     payload = json.loads(output)
     assert "DATABASE_URL" in payload["logs"]
+
+
+def test_tool_registry_exposes_new_read_only_tools_without_secret_values():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="CreateContainerConfigError",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(client, trigger)
+    config_refs = json.loads(
+        registry.execute(
+            "get_config_refs",
+            {"namespace": "payments", "kind": "Pod", "name": "checkout-abc"},
+        )
+    )
+    pvc_status = json.loads(
+        registry.execute(
+            "get_pvc_status",
+            {"namespace": "payments", "pod_name": "checkout-abc"},
+        )
+    )
+    assert config_refs["items"][0]["name"] == "checkout-env"
+    assert "value" not in json.dumps(config_refs)
+    assert pvc_status["items"][0]["phase"] == "Pending"
 
 
 def test_codex_agent_handles_function_call_then_structured_result():
@@ -211,6 +320,28 @@ def test_codex_agent_falls_back_when_model_output_is_invalid():
     diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
     assert diagnosis.used_fallback is True
     assert diagnosis.severity == "critical"
+
+
+def test_codex_agent_prompt_contains_preferred_tool_order_for_symptom():
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient([]),
+        rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    prompt = agent._build_user_prompt(
+        TriggerContext(
+            source="scheduled",
+            cluster="prod",
+            workload=WorkloadRef(kind="Deployment", namespace="payments", name="checkout"),
+            symptom="ProgressDeadlineExceeded",
+            observed_for_seconds=1800,
+        )
+    )
+    assert "Preferred tool order" in prompt
+    assert "get_deployment_status" in prompt
+    assert "get_workload_events" in prompt
 
 
 def test_agent_service_scan_once_emits_structured_report_body():
@@ -288,6 +419,7 @@ def test_service_lists_and_reads_reports():
     assert report["cluster"] == "prod"
     assert report["triggerAt"]
     assert report["analysisVersion"] == "0.1.0"
+    assert report["rawSignal"]["podPhase"] == "Running"
     assert service.get_report("missing") is None
 
 
@@ -308,6 +440,42 @@ def test_event_mapping_and_dedupe():
     )
     assert trigger is not None
     assert trigger.symptom == "CrashLoopBackOff"
+    assert trigger.raw_signal["involvedObject"]["name"] == "checkout-abc"
+    assert trigger.raw_signal["reason"] == "BackOff"
+    assert trigger.raw_signal["timestamp"] == "2026-03-22T05:00:00+00:00"
+
+    failed_mount = map_event_to_trigger(
+        "prod",
+        {
+            "type": "Warning",
+            "reason": "FailedMount",
+            "message": "Unable to attach or mount volumes",
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "payments",
+                "name": "checkout-abc",
+            },
+            "lastTimestamp": "2026-03-22T05:00:00Z",
+        },
+    )
+    assert failed_mount is not None
+    assert failed_mount.symptom == "FailedMount"
+
+    cannot_run = map_event_to_trigger(
+        "prod",
+        {
+            "type": "Warning",
+            "reason": "Failed",
+            "message": "container cannot run: executable file not found",
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "payments",
+                "name": "checkout-abc",
+            },
+        },
+    )
+    assert cannot_run is not None
+    assert cannot_run.symptom == "ContainerCannotRun"
 
     client = FakeKubernetesClient()
     settings = build_settings()
@@ -429,6 +597,194 @@ def test_backfill_rewrites_incomplete_reports():
     assert updated == [{"ok": True}]
     assert writer.calls[0][1].summary
     assert writer.calls[0][1].evidence
+
+
+def test_service_normalizes_report_metadata_without_unknown_placeholders():
+    class SparseClient(FakeKubernetesClient):
+        def list_reports(self):
+            return [
+                {
+                    "metadata": {"name": "diagnosis-sparse"},
+                    "spec": {
+                        "source": "event",
+                        "cluster": "",
+                        "namespace": "",
+                        "symptom": "CrashLoopBackOff",
+                        "observedFor": 0,
+                        "triggerAt": "2026-03-22T05:00:00+00:00",
+                        "workloadRef": {"kind": "", "name": ""},
+                    },
+                    "status": {
+                        "severity": "warning",
+                        "summary": "Detected CrashLoopBackOff.",
+                        "probableCauses": ["Crash loop detected."],
+                        "evidence": ["reason=BackOff"],
+                        "recommendations": ["Inspect logs."],
+                        "confidence": 0.6,
+                        "analysisVersion": "0.1.0",
+                        "modelInfo": {},
+                        "rawSignal": {
+                            "reason": "BackOff",
+                            "message": "Back-off restarting failed container",
+                            "timestamp": "2026-03-22T05:00:00+00:00",
+                            "involvedObject": {
+                                "kind": "Pod",
+                                "name": "checkout-abc",
+                                "namespace": "payments",
+                            },
+                        },
+                    },
+                }
+            ]
+
+    service = AgentService(
+        settings=build_settings(),
+        client=SparseClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient([]),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+    )
+    report = service.list_reports()[0]
+    assert report["workload"]["kind"] == "Pod"
+    assert report["workload"]["name"] == "checkout-abc"
+    assert report["namespace"] == "payments"
+    assert report["cluster"] == "prod"
+    assert report["modelInfo"]["name"] == "gpt-5-codex"
+    assert report["rawSignal"]["reason"] == "BackOff"
+
+
+def test_process_trigger_normalizes_event_metadata_before_writing():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient(
+                [
+                    {
+                        "output_text": json.dumps(
+                            {
+                                "summary": "",
+                                "severity": "warning",
+                                "probableCauses": [],
+                                "evidence": [],
+                                "recommendations": [],
+                                "confidence": 0.0,
+                            }
+                        )
+                    }
+                ]
+            ),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+    )
+    report = service.process_trigger(
+        TriggerContext(
+            source="event",
+            cluster="",
+            workload=WorkloadRef(kind="", namespace="", name=""),
+            symptom="CrashLoopBackOff",
+            observed_for_seconds=0,
+            raw_signal={
+                "reason": "BackOff",
+                "message": "Back-off restarting failed container",
+            },
+        )
+    )
+    assert report["spec"]["cluster"] == "prod"
+    assert report["spec"]["workloadRef"]["kind"] == "Pod"
+    assert report["spec"]["workloadRef"]["name"] == ""
+    assert report["status"]["modelInfo"]["name"] == "gpt-5-codex"
+    assert report["status"]["rawSignal"]["reason"] == "BackOff"
+    assert report["status"]["rawSignal"]["timestamp"]
+
+
+def test_process_trigger_enriches_raw_signal_for_pod_symptoms():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient(
+                [
+                    {
+                        "output_text": json.dumps(
+                            {
+                                "summary": "Volume mount is blocked by an unbound PVC.",
+                                "severity": "critical",
+                                "probableCauses": ["PVC is not bound."],
+                                "evidence": ["PVC phase is Pending."],
+                                "recommendations": ["Bind or recreate the PVC."],
+                                "confidence": 0.81,
+                            }
+                        )
+                    }
+                ]
+            ),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+    )
+    report = service.process_trigger(
+        TriggerContext(
+            source="event",
+            cluster="prod",
+            workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+            symptom="FailedMount",
+            observed_for_seconds=0,
+            raw_signal={"reason": "FailedMount", "message": "Unable to attach or mount volumes"},
+        )
+    )
+    assert report["status"]["rawSignal"]["podPhase"] == "Pending"
+    assert report["status"]["rawSignal"]["podReason"] == "Unschedulable"
+    assert report["status"]["rawSignal"]["containerReason"] == "CrashLoopBackOff"
+    assert report["status"]["rawSignal"]["pvcPhase"] == "Pending"
+
+
+def test_process_trigger_enriches_raw_signal_for_deployment_symptoms():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient(
+                [
+                    {
+                        "output_text": json.dumps(
+                            {
+                                "summary": "Rollout is stalled.",
+                                "severity": "critical",
+                                "probableCauses": ["Deployment exceeded its progress deadline."],
+                                "evidence": ["Deployment condition reports ProgressDeadlineExceeded."],
+                                "recommendations": ["Inspect rollout health."],
+                                "confidence": 0.7,
+                            }
+                        )
+                    }
+                ]
+            ),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+    )
+    report = service.process_trigger(
+        TriggerContext(
+            source="scheduled",
+            cluster="prod",
+            workload=WorkloadRef(kind="Deployment", namespace="payments", name="checkout"),
+            symptom="ProgressDeadlineExceeded",
+            observed_for_seconds=1800,
+        )
+    )
+    assert report["status"]["rawSignal"]["deploymentCondition"] == "ProgressDeadlineExceeded"
 
 
 def engine_result():
