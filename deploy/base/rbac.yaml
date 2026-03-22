@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-diagnosis-agent
+  namespace: k8s-diagnosis-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-diagnosis-agent-readonly
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "nodes", "namespaces", "resourcequotas"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["ops.ai.yourorg"]
+    resources: ["diagnosisreports"]
+    verbs: ["get", "list", "watch", "create", "patch", "update"]
+  - apiGroups: ["ops.ai.yourorg"]
+    resources: ["diagnosisreports/status"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-diagnosis-agent-readonly
+subjects:
+  - kind: ServiceAccount
+    name: k8s-diagnosis-agent
+    namespace: k8s-diagnosis-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8s-diagnosis-agent-readonly

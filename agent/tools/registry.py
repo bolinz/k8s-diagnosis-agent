@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from agent.k8s_client.base import KubernetesReadClient
+from agent.models import TriggerContext
+
+
+JSON = dict[str, Any]
+ToolHandler = Callable[[JSON], JSON]
+
+
+@dataclass
+class RegisteredTool:
+    name: str
+    description: str
+    parameters: JSON
+    handler: ToolHandler
+
+    def as_openai_tool(self) -> JSON:
+        return {
+            "type": "function",
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters,
+        }
+
+
+class ToolRegistry:
+    def __init__(self, client: KubernetesReadClient, trigger: TriggerContext) -> None:
+        self.client = client
+        self.trigger = trigger
+        self._tools = {
+            tool.name: tool for tool in self._build_tools()
+        }
+
+    def openai_tools(self) -> list[JSON]:
+        return [tool.as_openai_tool() for tool in self._tools.values()]
+
+    def execute(self, name: str, arguments: JSON) -> str:
+        if name not in self._tools:
+            return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=True)
+        result = self._tools[name].handler(arguments)
+        return json.dumps(result, ensure_ascii=True, sort_keys=True)
+
+    def _build_tools(self) -> list[RegisteredTool]:
+        workload_defaults = {
+            "type": "object",
+            "properties": {
+                "namespace": {"type": "string"},
+                "kind": {"type": "string"},
+                "name": {"type": "string"},
+            },
+            "required": ["namespace", "kind", "name"],
+            "additionalProperties": False,
+        }
+        pod_defaults = {
+            "type": "object",
+            "properties": {
+                "namespace": {"type": "string"},
+                "pod_name": {"type": "string"},
+                "container": {"type": "string"},
+            },
+            "required": ["namespace", "pod_name"],
+            "additionalProperties": False,
+        }
+        return [
+            RegisteredTool(
+                name="get_workload_status",
+                description="Read the current status of a workload or pod.",
+                parameters=workload_defaults,
+                handler=lambda args: self.client.get_workload_status(**args),
+            ),
+            RegisteredTool(
+                name="list_related_pods",
+                description="List pods related to the target workload.",
+                parameters=workload_defaults,
+                handler=lambda args: self.client.list_related_pods(**args),
+            ),
+            RegisteredTool(
+                name="get_pod_events",
+                description="Get recent Kubernetes events for a pod.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "pod_name": {"type": "string"},
+                    },
+                    "required": ["namespace", "pod_name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_pod_events(**args),
+            ),
+            RegisteredTool(
+                name="get_container_statuses",
+                description="Get container statuses and restart details for a pod.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "pod_name": {"type": "string"},
+                    },
+                    "required": ["namespace", "pod_name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_container_statuses(**args),
+            ),
+            RegisteredTool(
+                name="get_recent_logs",
+                description="Read the most recent logs for a pod container.",
+                parameters=pod_defaults,
+                handler=lambda args: self.client.get_recent_logs(**args),
+            ),
+            RegisteredTool(
+                name="get_node_conditions",
+                description="Inspect node conditions for a specific node or all nodes.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "node_name": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_node_conditions(**args),
+            ),
+            RegisteredTool(
+                name="get_namespace_quotas",
+                description="Inspect namespace resource quotas and usage.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                    },
+                    "required": ["namespace"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_namespace_quotas(**args),
+            ),
+            RegisteredTool(
+                name="get_hpa_status",
+                description="Inspect horizontal pod autoscaler state for a namespace or target.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "target_name": {"type": "string"},
+                    },
+                    "required": ["namespace"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_hpa_status(**args),
+            ),
+            RegisteredTool(
+                name="get_resource_metrics",
+                description="Read summarized resource metrics when available.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["namespace"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_resource_metrics(**args),
+            ),
+            RegisteredTool(
+                name="search_similar_reports",
+                description="Search previous DiagnosisReport objects for similar symptoms.",
+                parameters={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+                handler=lambda _args: self.client.search_similar_reports(self.trigger),
+            ),
+        ]

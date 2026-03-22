@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-diagnosis-agent
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-diagnosis-agent
+  template:
+    metadata:
+      labels:
+        app: k8s-diagnosis-agent
+    spec:
+      serviceAccountName: k8s-diagnosis-agent
+      imagePullSecrets:
+        - name: ghcr-creds
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: Always
+          args: ["run"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: OPENAI_MODEL
+              value: {{ .Values.openai.model | quote }}
+            - name: K8S_DIAGNOSIS_CLUSTER
+              value: {{ .Values.clusterName | quote }}
+            - name: K8S_DIAGNOSIS_NAMESPACE
+              value: {{ .Values.namespace | quote }}
+          envFrom:
+            - secretRef:
+                name: k8s-diagnosis-agent-secrets
+                optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "k8s-diagnosis-agent"
+version = "0.1.0"
+description = "Kubernetes diagnosis agent powered by GPT-5-Codex via the Responses API"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "vibe-coding" }]
+dependencies = [
+  "kubernetes>=29.0.0",
+  "jinja2>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=6.1,<9",
+]
+
+[project.scripts]
+k8s-diagnosis-agent = "agent.app:main"
+
+[tool.setuptools]
+packages = [
+  "agent",
+  "agent.analyzers",
+  "agent.config",
+  "agent.k8s_client",
+  "agent.orchestrator",
+  "agent.reporting",
+  "agent.ui",
+  "agent.tools",
+  "agent.triggers",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

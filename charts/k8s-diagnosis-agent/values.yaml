@@ -1,0 +1,12 @@
+image:
+  repository: ghcr.io/<your-github-user>/k8s-diagnosis-agent
+  tag: latest
+
+openai:
+  model: gpt-5-codex
+
+clusterName: example-cluster
+namespace: k8s-diagnosis-system
+ingress:
+  className: nginx
+  host: k8s-diagnosis.example.com
