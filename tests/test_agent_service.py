@@ -206,6 +206,7 @@ def build_settings() -> Settings:
         api_base_url="https://api.openai.com/v1",
         diagnosis_name_prefix="diagnosis",
         event_dedupe_window_seconds=300,
+        workload_name="k8s-diagnosis-agent",
     )
 
 
@@ -507,6 +508,60 @@ def test_event_mapping_and_dedupe():
     second = service.process_event_trigger(trigger)
     assert first is not None
     assert second is None
+
+
+def test_event_mapping_skips_events_without_object_name():
+    trigger = map_event_to_trigger(
+        "prod",
+        {
+            "type": "Warning",
+            "reason": "BackOff",
+            "message": "Back-off restarting failed container",
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "payments",
+                "name": "",
+            },
+        },
+    )
+    assert trigger is None
+
+
+def test_event_watcher_ignores_agent_self_events():
+    watcher = __import__("agent.triggers.event_watcher", fromlist=["EventWatcher"]).EventWatcher(
+        stream_factory=lambda: iter(()),
+        cluster_name="prod",
+        report_namespace="k8s-diagnosis-system",
+        workload_name="k8s-diagnosis-agent",
+        on_trigger=lambda _trigger: None,
+    )
+    assert watcher._should_ignore_event(
+        {
+            "involvedObject": {
+                "kind": "Deployment",
+                "namespace": "k8s-diagnosis-system",
+                "name": "k8s-diagnosis-agent",
+            }
+        }
+    ) is True
+    assert watcher._should_ignore_event(
+        {
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "k8s-diagnosis-system",
+                "name": "k8s-diagnosis-agent-abc123",
+            }
+        }
+    ) is True
+    assert watcher._should_ignore_event(
+        {
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "payments",
+                "name": "checkout-abc",
+            }
+        }
+    ) is False
 
 
 def test_service_fills_empty_diagnosis_fields_from_fallback():
