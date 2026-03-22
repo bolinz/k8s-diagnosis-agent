@@ -7,6 +7,7 @@ on:
   pull_request:
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/k8s-diagnosis-agent-app
 
 jobs:
