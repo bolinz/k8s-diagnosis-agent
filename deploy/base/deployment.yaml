@@ -38,6 +38,8 @@ spec:
               value: ""
             - name: LOG_LEVEL
               value: INFO
+            - name: K8S_DIAGNOSIS_REQUEST_TIMEOUT_SECONDS
+              value: "45"
             - name: K8S_DIAGNOSIS_CLUSTER
               value: example-cluster
             - name: K8S_DIAGNOSIS_NAMESPACE
