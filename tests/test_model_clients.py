@@ -9,7 +9,7 @@ from agent.orchestrator.responses_client import (
     OllamaResponsesClient,
     OpenAIResponsesClient,
 )
-from agent.runtime_logging import JsonFormatter, get_logger, log_event
+from agent.runtime_logging import JsonFormatter, get_logger, log_event, setup_logging
 
 
 class FakeHTTPResponse:
@@ -134,3 +134,10 @@ def test_json_logging_outputs_structured_fields_without_secrets():
     assert payload["provider"] == "ollama"
     assert "api_key" not in payload
     assert "openai_api_key" not in payload
+
+
+def test_setup_logging_suppresses_noisy_library_debug_loggers():
+    setup_logging("DEBUG")
+
+    assert logging.getLogger("kubernetes").level == logging.WARNING
+    assert logging.getLogger("urllib3").level == logging.WARNING
