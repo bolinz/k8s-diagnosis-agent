@@ -20,7 +20,7 @@ def _iso(dt: datetime) -> str:
 
 @dataclass
 class DiagnosisReportFormatter:
-    analysis_version: str = "0.3.0"
+    analysis_version: str = "0.3.1"
 
     def build_spec(
         self,
