@@ -82,22 +82,62 @@ spec:
                   type: array
                   items:
                     type: object
+                    properties:
+                      kind:
+                        type: string
+                      namespace:
+                        type: string
+                      name:
+                        type: string
+                      role:
+                        type: string
                 rootCauseCandidates:
                   type: array
                   items:
                     type: object
+                    properties:
+                      objectRef:
+                        type: object
+                        properties:
+                          kind:
+                            type: string
+                          namespace:
+                            type: string
+                          name:
+                            type: string
+                      reason:
+                        type: string
+                      confidence:
+                        type: number
                 evidenceTimeline:
                   type: array
                   items:
                     type: object
+                    properties:
+                      time:
+                        type: string
+                      objectRef:
+                        type: object
+                        properties:
+                          kind:
+                            type: string
+                          namespace:
+                            type: string
+                          name:
+                            type: string
+                      signal:
+                        type: string
                 impactSummary:
                   type: object
+                  x-kubernetes-preserve-unknown-fields: true
                 analysisVersion:
                   type: string
                 modelInfo:
                   type: object
+                  x-kubernetes-preserve-unknown-fields: true
                 rawSignal:
                   type: object
+                  x-kubernetes-preserve-unknown-fields: true
                 lastAnalyzedAt:
                   type: string
       subresources:
