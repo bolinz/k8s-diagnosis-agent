@@ -12,6 +12,7 @@ ollama:
   model: ""
 
 logLevel: INFO
+requestTimeoutSeconds: 45
 
 clusterName: example-cluster
 namespace: k8s-diagnosis-system

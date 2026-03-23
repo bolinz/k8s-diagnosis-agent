@@ -2,7 +2,7 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Current release: `v0.4.0`
+Current release: `v0.4.1`
 
 ## Features
 
@@ -95,6 +95,7 @@ Environment variables:
 - `OLLAMA_BASE_URL`: defaults to `http://127.0.0.1:11434`
 - `OLLAMA_MODEL`: required when `MODEL_PROVIDER=ollama`
 - `LOG_LEVEL`: `DEBUG|INFO|WARNING|ERROR`, default `INFO`
+- `K8S_DIAGNOSIS_REQUEST_TIMEOUT_SECONDS`: model request timeout in seconds, default `45`
 - `K8S_DIAGNOSIS_CLUSTER`: logical cluster name written into reports
 - `K8S_DIAGNOSIS_NAMESPACE`: namespace that stores `DiagnosisReport` resources
 - `K8S_DIAGNOSIS_SCAN_INTERVAL_SECONDS`: scheduler interval, default `300`
@@ -109,6 +110,17 @@ Secrets and image pull notes:
 - `k8s-diagnosis-agent-secrets` may contain `OPENAI_API_KEY`; it is optional
 - `ghcr-creds` is used to pull private or rate-limited GHCR images
 
+Example Ollama runtime configuration:
+
+```bash
+kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
+  MODEL_PROVIDER=ollama \
+  OLLAMA_BASE_URL=http://192.168.100.182:11434 \
+  OLLAMA_MODEL=qwen3:8b \
+  LOG_LEVEL=DEBUG \
+  K8S_DIAGNOSIS_REQUEST_TIMEOUT_SECONDS=120
+```
+
 ## Limits and Known Boundaries
 
 - Single-cluster oriented deployment model
@@ -119,9 +131,9 @@ Secrets and image pull notes:
 
 ## Release and Versioning
 
-- Current release: `v0.4.0`
-- Python package version: `0.4.0`
-- Helm chart version: `0.4.0`
+- Current release: `v0.4.1`
+- Python package version: `0.4.1`
+- Helm chart version: `0.4.1`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
 
 The current CI workflow:
@@ -131,7 +143,7 @@ The current CI workflow:
 - uses shell `docker` commands for image build and push
 - does not auto-create GitHub Releases yet
 
-`v0.4.0` adds provider abstraction, Ollama support, and structured runtime logging:
+`v0.4.1` adds provider abstraction, Ollama support, structured runtime logging, and a patch for provider-accurate runtime model selection:
 
 - switch between `openai` and `ollama` with explicit `MODEL_PROVIDER`
 - support tool-calling diagnosis through an Ollama client adapter

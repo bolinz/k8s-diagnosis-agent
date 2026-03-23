@@ -833,7 +833,7 @@ def build_runtime_service(settings: Settings) -> AgentService:
     codex_agent = CodexDiagnosisAgent(
         responses_client=responses_client,
         rule_engine=engine,
-        model=settings.openai_model,
+        model=responses_client.model,
         max_tool_calls=settings.max_tool_calls,
         max_input_bytes=settings.max_input_bytes,
     )

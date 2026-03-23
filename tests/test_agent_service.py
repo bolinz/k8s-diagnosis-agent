@@ -8,7 +8,7 @@ from agent.config.settings import Settings
 from agent.models import TriggerContext, WorkloadRef
 from agent.orchestrator.codex_agent import CodexDiagnosisAgent
 from agent.reporting.diagnosis_reporter import DiagnosisReportFormatter
-from agent.service import AgentService, build_model_client
+from agent.service import AgentService, build_model_client, build_runtime_service
 from agent.tools.registry import ToolRegistry
 from agent.triggers.event_watcher import map_event_to_trigger
 
@@ -331,6 +331,35 @@ def test_build_model_client_rejects_invalid_provider():
         assert "Unsupported MODEL_PROVIDER" in str(exc)
     else:
         raise AssertionError("expected invalid provider to raise")
+
+
+def test_build_runtime_service_uses_selected_provider_model(monkeypatch):
+    settings = build_settings()
+    settings.model_provider = "ollama"
+    settings.ollama_model = "qwen3:8b"
+
+    class FakeRuntimeClient:
+        def __init__(self, report_namespace):
+            self.report_namespace = report_namespace
+
+    class FakeReportWriter:
+        def __init__(self, report_namespace, formatter):
+            self.report_namespace = report_namespace
+            self.formatter = formatter
+
+    monkeypatch.setattr(
+        "agent.k8s_client.runtime.RuntimeKubernetesClient",
+        FakeRuntimeClient,
+    )
+    monkeypatch.setattr(
+        "agent.service.KubernetesDiagnosisReportWriter",
+        FakeReportWriter,
+    )
+
+    service = build_runtime_service(settings)
+
+    assert service.codex_agent.model == "qwen3:8b"
+    assert service.codex_agent.responses_client.provider_name == "ollama"
 
 
 def test_tool_registry_executes_registered_tools():
