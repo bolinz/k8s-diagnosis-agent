@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -10,6 +11,20 @@ from agent.models import TriggerContext
 
 JSON = dict[str, Any]
 ToolHandler = Callable[[JSON], JSON]
+
+
+def _json_friendly(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_friendly(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_friendly(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_friendly(item) for item in value]
+    return value
 
 
 @dataclass
@@ -43,7 +58,7 @@ class ToolRegistry:
         if name not in self._tools:
             return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=True)
         result = self._tools[name].handler(arguments)
-        return json.dumps(result, ensure_ascii=True, sort_keys=True)
+        return json.dumps(_json_friendly(result), ensure_ascii=True, sort_keys=True)
 
     def _build_tools(self) -> list[RegisteredTool]:
         workload_defaults = {
