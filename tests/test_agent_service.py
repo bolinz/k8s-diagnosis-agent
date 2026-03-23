@@ -8,7 +8,7 @@ from agent.config.settings import Settings
 from agent.models import TriggerContext, WorkloadRef
 from agent.orchestrator.codex_agent import CodexDiagnosisAgent
 from agent.reporting.diagnosis_reporter import DiagnosisReportFormatter
-from agent.service import AgentService
+from agent.service import AgentService, build_model_client
 from agent.tools.registry import ToolRegistry
 from agent.triggers.event_watcher import map_event_to_trigger
 
@@ -278,8 +278,10 @@ class FakeKubernetesClient:
 
 def build_settings() -> Settings:
     return Settings(
+        model_provider="openai",
         openai_api_key="key",
         openai_model="gpt-5-codex",
+        ollama_model="llama3.1",
         cluster_name="prod",
         report_namespace="k8s-diagnosis-system",
         scan_interval_seconds=300,
@@ -289,9 +291,11 @@ def build_settings() -> Settings:
         max_input_bytes=20000,
         request_timeout_seconds=30,
         api_base_url="https://api.openai.com/v1",
+        ollama_base_url="http://127.0.0.1:11434",
         diagnosis_name_prefix="diagnosis",
         event_dedupe_window_seconds=300,
         workload_name="k8s-diagnosis-agent",
+        log_level="INFO",
     )
 
 
@@ -305,6 +309,28 @@ def build_fallback_agent() -> CodexDiagnosisAgent:
         max_tool_calls=8,
         max_input_bytes=20000,
     )
+
+
+def test_build_model_client_selects_openai_and_ollama():
+    openai_client = build_model_client(build_settings())
+    assert openai_client.provider_name == "openai"
+
+    settings = build_settings()
+    settings.model_provider = "ollama"
+    ollama_client = build_model_client(settings)
+    assert ollama_client.provider_name == "ollama"
+    assert ollama_client.model == "llama3.1"
+
+
+def test_build_model_client_rejects_invalid_provider():
+    settings = build_settings()
+    settings.model_provider = "invalid"
+    try:
+        build_model_client(settings)
+    except ValueError as exc:
+        assert "Unsupported MODEL_PROVIDER" in str(exc)
+    else:
+        raise AssertionError("expected invalid provider to raise")
 
 
 def test_tool_registry_executes_registered_tools():

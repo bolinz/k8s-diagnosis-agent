@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any
+import logging
 
 from agent.models import DiagnosisResult, TriggerContext
+from agent.runtime_logging import get_logger, log_event
 
 try:
     from kubernetes import client, config
@@ -16,6 +18,9 @@ except ImportError:  # pragma: no cover
 
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+
+LOGGER = get_logger("report_writer")
 
 
 @dataclass
@@ -137,7 +142,7 @@ class KubernetesDiagnosisReportWriter:
                 plural="diagnosisreports",
                 body=body,
             )
-        return self.custom.patch_namespaced_custom_object_status(
+        result = self.custom.patch_namespaced_custom_object_status(
             group="ops.ai.yourorg",
             version="v1alpha1",
             namespace=namespace,
@@ -145,3 +150,15 @@ class KubernetesDiagnosisReportWriter:
             name=name,
             body=status_body,
         )
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "report_upserted",
+            "diagnosis report written",
+            report_name=name,
+            namespace=trigger.workload.namespace,
+            workload_kind=trigger.workload.kind,
+            workload_name=trigger.workload.name,
+            symptom=trigger.symptom,
+        )
+        return result

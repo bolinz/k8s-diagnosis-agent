@@ -2,8 +2,16 @@ image:
   repository: ghcr.io/bolinz/k8s-diagnosis-agent-app
   tag: latest
 
+modelProvider: openai
+
 openai:
   model: gpt-5-codex
+
+ollama:
+  baseUrl: http://ollama:11434
+  model: ""
+
+logLevel: INFO
 
 clusterName: example-cluster
 namespace: k8s-diagnosis-system

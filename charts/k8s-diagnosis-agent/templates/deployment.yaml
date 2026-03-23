@@ -28,8 +28,16 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: MODEL_PROVIDER
+              value: {{ .Values.modelProvider | quote }}
             - name: OPENAI_MODEL
               value: {{ .Values.openai.model | quote }}
+            - name: OLLAMA_BASE_URL
+              value: {{ .Values.ollama.baseUrl | quote }}
+            - name: OLLAMA_MODEL
+              value: {{ .Values.ollama.model | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
             - name: K8S_DIAGNOSIS_CLUSTER
               value: {{ .Values.clusterName | quote }}
             - name: K8S_DIAGNOSIS_NAMESPACE

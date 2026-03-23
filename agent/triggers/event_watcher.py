@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 import threading
 from datetime import datetime, timezone
 from typing import Callable
 
 from agent.models import TriggerContext, WorkloadRef
+from agent.runtime_logging import get_logger, log_event
 
 
 IGNORED_REASONS = {
@@ -16,6 +18,9 @@ IGNORED_REASONS = {
     "SuccessfulCreate",
     "ScalingReplicaSet",
 }
+
+
+LOGGER = get_logger("event_watcher")
 
 
 def _parse_event_time(event: dict) -> datetime:
@@ -140,11 +145,28 @@ class EventWatcher(threading.Thread):
                     obj = item.get("object", item)
                     event_dict = obj.to_dict() if hasattr(obj, "to_dict") else obj
                     if self._should_ignore_event(event_dict):
+                        log_event(LOGGER, logging.DEBUG, "event_skipped", "skipping ignored event")
                         continue
                     trigger = map_event_to_trigger(self.cluster_name, event_dict)
                     if trigger is not None:
+                        log_event(
+                            LOGGER,
+                            logging.INFO,
+                            "event_trigger",
+                            "accepted event trigger",
+                            namespace=trigger.workload.namespace,
+                            workload_kind=trigger.workload.kind,
+                            workload_name=trigger.workload.name,
+                            symptom=trigger.symptom,
+                        )
                         self.on_trigger(trigger)
             except Exception:
+                log_event(
+                    LOGGER,
+                    logging.ERROR,
+                    "watch_failed",
+                    "event watch stream failed and will be retried",
+                )
                 if self._stop_event.wait(5):
                     break
             finally:

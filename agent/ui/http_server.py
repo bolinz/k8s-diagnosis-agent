@@ -4,8 +4,13 @@ import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+import logging
 
+from agent.runtime_logging import get_logger, log_event
 from agent.ui.templates import INDEX_HTML
+
+
+LOGGER = get_logger("http")
 
 
 def serve_http(port: int, service) -> None:
@@ -17,6 +22,15 @@ def serve_http(port: int, service) -> None:
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "http_response",
+                "request handled",
+                method=self.command,
+                path=self.path,
+                status=status.value,
+            )
 
         def _write_html(self, body: str, status=HTTPStatus.OK) -> None:
             data = body.encode("utf-8")
@@ -25,6 +39,15 @@ def serve_http(port: int, service) -> None:
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "http_response",
+                "request handled",
+                method=self.command,
+                path=self.path,
+                status=status.value,
+            )
 
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)

@@ -2,7 +2,7 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Current release: `v0.3.1`
+Current release: `v0.4.0`
 
 ## Features
 
@@ -89,8 +89,12 @@ kubectl port-forward -n k8s-diagnosis-system svc/k8s-diagnosis-agent 18080:8080
 Environment variables:
 
 - `OPENAI_API_KEY`: enables Codex-backed diagnosis; without it the service uses fallback logic
+- `MODEL_PROVIDER`: `openai` or `ollama`, default `openai`
 - `OPENAI_MODEL`: defaults to `gpt-5-codex`
 - `OPENAI_API_BASE_URL`: defaults to `https://api.openai.com/v1`
+- `OLLAMA_BASE_URL`: defaults to `http://127.0.0.1:11434`
+- `OLLAMA_MODEL`: required when `MODEL_PROVIDER=ollama`
+- `LOG_LEVEL`: `DEBUG|INFO|WARNING|ERROR`, default `INFO`
 - `K8S_DIAGNOSIS_CLUSTER`: logical cluster name written into reports
 - `K8S_DIAGNOSIS_NAMESPACE`: namespace that stores `DiagnosisReport` resources
 - `K8S_DIAGNOSIS_SCAN_INTERVAL_SECONDS`: scheduler interval, default `300`
@@ -115,9 +119,9 @@ Secrets and image pull notes:
 
 ## Release and Versioning
 
-- Current release: `v0.3.1`
-- Python package version: `0.3.1`
-- Helm chart version: `0.3.1`
+- Current release: `v0.4.0`
+- Python package version: `0.4.0`
+- Helm chart version: `0.4.0`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
 
 The current CI workflow:
@@ -127,11 +131,11 @@ The current CI workflow:
 - uses shell `docker` commands for image build and push
 - does not auto-create GitHub Releases yet
 
-`v0.3.1` fixes CRD schema pruning for cross-object attribution fields:
+`v0.4.0` adds provider abstraction, Ollama support, and structured runtime logging:
 
-- preserve nested `relatedObjects`, `rootCauseCandidates`, and `evidenceTimeline` content in `DiagnosisReport.status`
-- preserve nested `modelInfo`, `rawSignal`, and `impactSummary` content
-- keep the `v0.3.0` attribution and evidence-chain runtime behavior unchanged
+- switch between `openai` and `ollama` with explicit `MODEL_PROVIDER`
+- support tool-calling diagnosis through an Ollama client adapter
+- emit structured JSON logs for startup, triggers, tool calls, model requests, and report writes
 
 ## Contributing and License
 
