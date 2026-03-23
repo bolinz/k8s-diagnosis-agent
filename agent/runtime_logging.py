@@ -28,6 +28,8 @@ def setup_logging(level: str) -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     root.handlers = [handler]
+    for logger_name in ("kubernetes", "urllib3", "asyncio", "httpx"):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
 def get_logger(component: str) -> logging.Logger:
