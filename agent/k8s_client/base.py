@@ -15,7 +15,19 @@ class KubernetesReadClient(Protocol):
     def get_workload_events(self, namespace: str, kind: str, name: str) -> dict:
         ...
 
+    def get_owner_chain(self, namespace: str, kind: str, name: str) -> dict:
+        ...
+
+    def get_related_events(self, namespace: str, kind: str, name: str) -> dict:
+        ...
+
     def list_related_pods(self, namespace: str, kind: str, name: str) -> dict:
+        ...
+
+    def get_attached_pvcs(self, namespace: str, pod_name: str) -> dict:
+        ...
+
+    def get_pvc_dependents(self, namespace: str, pvc_name: str) -> dict:
         ...
 
     def get_pod_events(self, namespace: str, pod_name: str) -> dict:
@@ -53,6 +65,9 @@ class KubernetesReadClient(Protocol):
     def get_node_conditions(self, node_name: str | None = None) -> dict:
         ...
 
+    def get_node_workload_impact(self, node_name: str) -> dict:
+        ...
+
     def get_namespace_quotas(self, namespace: str) -> dict:
         ...
 
@@ -63,6 +78,9 @@ class KubernetesReadClient(Protocol):
         ...
 
     def search_similar_reports(self, trigger: TriggerContext) -> dict:
+        ...
+
+    def get_related_reports(self, namespace: str, kind: str, name: str) -> dict:
         ...
 
     def list_reports(self) -> list[dict]:

@@ -18,6 +18,9 @@ def test_ui_template_contains_expected_sections():
     assert "workloadLabel(" in INDEX_HTML
     assert "Workload Context" in INDEX_HTML
     assert "Key Signals" in INDEX_HTML
+    assert "Primary Finding" in INDEX_HTML
+    assert "Related Objects" in INDEX_HTML
+    assert "Evidence Timeline" in INDEX_HTML
 
 
 def test_service_api_shape_matches_ui_expectations():
@@ -50,6 +53,10 @@ def test_service_api_shape_matches_ui_expectations():
     assert detail["recommendations"]
     assert detail["rawSignal"]["reason"] == "BackOff"
     assert detail["rawSignal"]["containerReason"] == "CrashLoopBackOff"
+    assert detail["relatedObjects"]
+    assert detail["rootCauseCandidates"]
+    assert detail["evidenceTimeline"]
+    assert detail["impactSummary"]["workloadCount"] == 1
 
 
 def test_service_does_not_emit_unknown_or_na_placeholders():
@@ -74,7 +81,7 @@ def test_service_does_not_emit_unknown_or_na_placeholders():
                         "evidence": ["Scheduler is blocked."],
                         "recommendations": ["Inspect scheduling constraints."],
                         "confidence": 0.5,
-                        "analysisVersion": "0.1.0",
+                        "analysisVersion": "0.3.0",
                     },
                 }
             ]

@@ -262,6 +262,14 @@ INDEX_HTML = """<!doctype html>
       return (item.evidence || []).slice(0, 3);
     }
 
+    function objectLabel(ref) {
+      if (!ref) return "";
+      const kind = ref.kind || "";
+      const name = ref.name || "";
+      if (!kind || !name) return "";
+      return `${escapeHtml(kind)}/${escapeHtml(name)}`;
+    }
+
     function escapeHtml(value) {
       return String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -321,6 +329,8 @@ INDEX_HTML = """<!doctype html>
           <h3>${workloadLabel(item)}</h3>
           <div>${escapeHtml(item.summary)}</div>
           <div class="meta" style="margin-top: 8px;">
+            ${item.relatedObjects?.length ? `<span>${escapeHtml(item.relatedObjects.length)} related objects</span>` : ""}
+            ${item.rootCauseCandidates?.[0]?.objectRef ? `<span>root ${objectLabel(item.rootCauseCandidates[0].objectRef)}</span>` : ""}
             ${hasValue(item.triggerAt) ? `<span>trigger ${escapeHtml(item.triggerAt)}</span>` : ""}
             ${hasValue(item.lastAnalyzedAt) ? `<span>${escapeHtml(item.lastAnalyzedAt)}</span>` : ""}
           </div>
@@ -372,6 +382,25 @@ INDEX_HTML = """<!doctype html>
         .filter(Boolean)
         .map((signal) => `<li>${escapeHtml(signal)}</li>`)
         .join("");
+      const relatedObjects = (item.relatedObjects || [])
+        .map((ref) => `<li>${objectLabel(ref)}${ref.role ? ` (${escapeHtml(ref.role)})` : ""}</li>`)
+        .join("");
+      const evidenceTimeline = (item.evidenceTimeline || [])
+        .map((entry) => `<li>${entry.time ? `${escapeHtml(entry.time)} - ` : ""}${objectLabel(entry.objectRef)}${entry.signal ? `: ${escapeHtml(entry.signal)}` : ""}</li>`)
+        .join("");
+      const primaryFinding = [
+        metadataLine("Kind", item.workload?.kind),
+        metadataLine("Name", item.workload?.name),
+        metadataLine("Namespace", item.namespace),
+        metadataLine("Symptom", item.symptom),
+        metadataLine("Severity", item.severity),
+      ].filter(Boolean).join("");
+      const impactSummary = [
+        metadataLine("Affected workloads", item.impactSummary?.workloadCount),
+        metadataLine("Affected pods", item.impactSummary?.podCount),
+        metadataLine("Cross namespace", hasValue(item.impactSummary?.crossNamespace) ? String(item.impactSummary.crossNamespace) : ""),
+        metadataLine("Related reports", item.impactSummary?.relatedReportCount),
+      ].filter(Boolean).join("");
       detailEl.innerHTML = `
         <h2>${workloadLabel(item)}</h2>
         <p class="summary">${escapeHtml(item.summary)}</p>
@@ -383,13 +412,29 @@ INDEX_HTML = """<!doctype html>
           ${hasValue(item.cluster) ? `<span>cluster ${escapeHtml(item.cluster)}</span>` : ""}
         </div>
         <div class="section">
+          <h3>Primary Finding</h3>
+          <ul>${primaryFinding}</ul>
+        </div>
+        <div class="section">
           <h3>Workload Context</h3>
-          <ul>${context}</ul>
+          <ul>${context}${impactSummary}</ul>
         </div>
         <div class="section">
           <h3>Key Signals</h3>
           <ul>${signalItems}</ul>
         </div>
+        ${(item.relatedObjects || []).length ? `
+        <div class="section">
+          <h3>Related Objects</h3>
+          <ul>${relatedObjects}</ul>
+        </div>
+        ` : ""}
+        ${(item.evidenceTimeline || []).length ? `
+        <div class="section">
+          <h3>Evidence Timeline</h3>
+          <ul>${evidenceTimeline}</ul>
+        </div>
+        ` : ""}
         <div class="section">
           <h3>Probable Causes</h3>
           <ul>${item.probableCauses.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
@@ -398,6 +443,12 @@ INDEX_HTML = """<!doctype html>
           <h3>Evidence</h3>
           <ul>${item.evidence.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
         </div>
+        ${(item.rootCauseCandidates || []).length ? `
+        <div class="section">
+          <h3>Root Cause Candidates</h3>
+          <ul>${item.rootCauseCandidates.map((x) => `<li>${objectLabel(x.objectRef)}${x.reason ? `: ${escapeHtml(x.reason)}` : ""}${hasValue(x.confidence) ? ` (confidence ${escapeHtml(x.confidence)})` : ""}</li>`).join("")}</ul>
+        </div>
+        ` : ""}
         <div class="section">
           <h3>Fix Suggestions</h3>
           <ul>${item.recommendations.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>

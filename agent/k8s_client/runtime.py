@@ -65,6 +65,16 @@ def _condition_summaries(conditions: list[Any] | None) -> list[dict[str, Any]]:
     return items
 
 
+def _object_ref(kind: str | None, namespace: str | None, name: str | None, **extra: Any) -> dict[str, Any]:
+    payload = {
+        "kind": kind or "",
+        "namespace": namespace or "",
+        "name": name or "",
+    }
+    payload.update({key: value for key, value in extra.items() if value not in (None, "")})
+    return payload
+
+
 def _container_spec_summary(container: Any) -> dict[str, Any]:
     return {
         "name": getattr(container, "name", None),
@@ -254,6 +264,41 @@ class RuntimeKubernetesClient:
             ]
         }
 
+    def get_owner_chain(self, namespace: str, kind: str, name: str) -> dict:
+        try:
+            current = self._read_workload(namespace, kind, name)
+        except Exception as exc:
+            return _api_error(exc, "owner_chain", namespace=namespace, kind=kind, name=name)
+        items: list[dict[str, Any]] = []
+        current_kind = kind
+        current_namespace = namespace
+        while current is not None:
+            metadata = getattr(current, "metadata", None)
+            items.append(
+                _object_ref(
+                    current_kind,
+                    current_namespace,
+                    getattr(metadata, "name", name),
+                )
+            )
+            owner_refs = list(getattr(metadata, "owner_references", None) or [])
+            if not owner_refs:
+                break
+            owner = owner_refs[0]
+            current_kind = owner.kind
+            current_namespace = namespace
+            try:
+                current = self._read_workload(namespace, owner.kind, owner.name)
+            except Exception:
+                items.append(_object_ref(owner.kind, namespace, owner.name))
+                break
+        return {"items": items}
+
+    def get_related_events(self, namespace: str, kind: str, name: str) -> dict:
+        result = self.get_workload_events(namespace, kind, name)
+        items = result.get("items", []) if isinstance(result, dict) else []
+        return {"items": items[:10], "window": "recent"}
+
     def list_related_pods(self, namespace: str, kind: str, name: str) -> dict:
         try:
             if kind.lower() == "pod":
@@ -271,6 +316,48 @@ class RuntimeKubernetesClient:
             return {"items": [_coerce_dict(item) for item in pods.items], "selector": selector}
         except Exception as exc:
             return _api_error(exc, "related_pods", namespace=namespace, kind=kind, name=name)
+
+    def get_attached_pvcs(self, namespace: str, pod_name: str) -> dict:
+        try:
+            pod = self.core.read_namespaced_pod(name=pod_name, namespace=namespace)
+        except Exception as exc:
+            return _api_error(exc, "attached_pvcs", namespace=namespace, pod_name=pod_name)
+        items = []
+        for volume in pod.spec.volumes or []:
+            claim = getattr(volume, "persistent_volume_claim", None)
+            if claim is None or not getattr(claim, "claim_name", None):
+                continue
+            pvc = self.get_pvc_status(namespace=namespace, pvc_name=claim.claim_name)
+            pvc_item = (pvc.get("items") or [{}])[0]
+            items.append(
+                {
+                    "name": claim.claim_name,
+                    "phase": pvc_item.get("phase"),
+                    "volumeName": pvc_item.get("volumeName"),
+                }
+            )
+        return {"items": items}
+
+    def get_pvc_dependents(self, namespace: str, pvc_name: str) -> dict:
+        try:
+            pods = self.core.list_namespaced_pod(namespace=namespace)
+        except Exception as exc:
+            return _api_error(exc, "pvc_dependents", namespace=namespace, pvc_name=pvc_name)
+        items = []
+        for pod in pods.items:
+            for volume in pod.spec.volumes or []:
+                claim = getattr(volume, "persistent_volume_claim", None)
+                if claim is not None and getattr(claim, "claim_name", None) == pvc_name:
+                    items.append(
+                        {
+                            "kind": "Pod",
+                            "namespace": namespace,
+                            "name": pod.metadata.name,
+                            "phase": getattr(pod.status, "phase", None),
+                        }
+                    )
+                    break
+        return {"items": items}
 
     def get_pod_events(self, namespace: str, pod_name: str) -> dict:
         try:
@@ -463,6 +550,34 @@ class RuntimeKubernetesClient:
         nodes = self.core.list_node()
         return {"items": [_coerce_dict(item) for item in nodes.items]}
 
+    def get_node_workload_impact(self, node_name: str) -> dict:
+        try:
+            pods = self.core.list_pod_for_all_namespaces(
+                watch=False,
+                field_selector=f"spec.nodeName={node_name}",
+            )
+        except Exception as exc:
+            return _api_error(exc, "node_workload_impact", node_name=node_name)
+        items = []
+        namespaces: set[str] = set()
+        for pod in pods.items[:20]:
+            namespaces.add(pod.metadata.namespace)
+            items.append(
+                {
+                    "kind": "Pod",
+                    "namespace": pod.metadata.namespace,
+                    "name": pod.metadata.name,
+                    "phase": getattr(pod.status, "phase", None),
+                    "reason": getattr(pod.status, "reason", None),
+                }
+            )
+        return {
+            "node": node_name,
+            "items": items,
+            "podCount": len(items),
+            "crossNamespace": len(namespaces) > 1,
+        }
+
     def get_namespace_quotas(self, namespace: str) -> dict:
         try:
             quotas = self.core.list_namespaced_resource_quota(namespace)
@@ -512,6 +627,25 @@ class RuntimeKubernetesClient:
             ):
                 items.append(item)
         return {"items": items}
+
+    def get_related_reports(self, namespace: str, kind: str, name: str) -> dict:
+        reports = self.custom.list_namespaced_custom_object(
+            group="ops.ai.yourorg",
+            version="v1alpha1",
+            namespace=self.report_namespace,
+            plural="diagnosisreports",
+        )
+        items = []
+        for item in reports.get("items", []):
+            spec = item.get("spec", {})
+            workload = spec.get("workloadRef", {})
+            if (
+                spec.get("namespace") == namespace
+                and workload.get("kind") == kind
+                and workload.get("name") == name
+            ):
+                items.append(item)
+        return {"items": items[:10]}
 
     def list_reports(self) -> list[dict]:
         reports = self.custom.list_namespaced_custom_object(

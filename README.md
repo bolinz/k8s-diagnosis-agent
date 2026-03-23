@@ -2,7 +2,7 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Current release: `v0.2.1`
+Current release: `v0.3.0`
 
 ## Features
 
@@ -115,9 +115,9 @@ Secrets and image pull notes:
 
 ## Release and Versioning
 
-- Current release: `v0.2.1`
-- Python package version: `0.2.1`
-- Helm chart version: `0.2.1`
+- Current release: `v0.3.0`
+- Python package version: `0.3.0`
+- Helm chart version: `0.3.0`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
 
 The current CI workflow:
@@ -127,11 +127,11 @@ The current CI workflow:
 - uses shell `docker` commands for image build and push
 - does not auto-create GitHub Releases yet
 
-`v0.2.1` includes post-`v0.2.0` operational fixes:
+`v0.3.0` adds cross-object attribution and evidence-chain analysis:
 
-- filter invalid event objects so new `Pod/unknown` reports are not generated
-- ignore the agent's own workload in event watch and scheduled scans
-- remove Docker GitHub Actions dependencies from the container job
+- correlate Pods, owners, nodes, PVCs, events, and prior reports into a single finding
+- store `relatedObjects`, `rootCauseCandidates`, `evidenceTimeline`, and `impactSummary`
+- expose the new evidence-chain view in the embedded UI
 
 ## Contributing and License
 

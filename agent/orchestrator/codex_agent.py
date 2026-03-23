@@ -14,6 +14,8 @@ You can only use the provided read-only tools.
 You must not suggest direct kubectl mutations.
 Return final output as strict JSON with fields:
 summary, severity, probableCauses, evidence, recommendations, confidence.
+Optional fields:
+relatedObjects, rootCauseCandidates, evidenceTimeline, impactSummary.
 Confidence must be a float between 0 and 1.
 Evidence and recommendations must be short, concrete strings.
 If evidence is insufficient, say so explicitly in summary and lower confidence.
@@ -97,6 +99,7 @@ class CodexDiagnosisAgent:
             f"Symptom: {trigger.symptom}\n"
             f"Observed for seconds: {trigger.observed_for_seconds}\n"
             f"Raw signal: {signal_json[: self.max_input_bytes]}\n"
+            f"Correlation context: {json.dumps(trigger.correlation_context, ensure_ascii=True, sort_keys=True)[: self.max_input_bytes]}\n"
             f"Preferred tool order: {preferred_tools}\n"
             "Use tools to gather evidence before concluding."
         )
@@ -152,6 +155,18 @@ class CodexDiagnosisAgent:
                 str(item) for item in payload.get("recommendations", []) if str(item)
             ],
             confidence=float(payload.get("confidence", 0.0)),
+            related_objects=[
+                item for item in payload.get("relatedObjects", []) if isinstance(item, dict)
+            ],
+            root_cause_candidates=[
+                item for item in payload.get("rootCauseCandidates", []) if isinstance(item, dict)
+            ],
+            evidence_timeline=[
+                item for item in payload.get("evidenceTimeline", []) if isinstance(item, dict)
+            ],
+            impact_summary=payload.get("impactSummary", {})
+            if isinstance(payload.get("impactSummary", {}), dict)
+            else {},
             raw_agent_output={"response": response, "text": text},
         )
 

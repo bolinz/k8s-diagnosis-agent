@@ -25,6 +25,7 @@ class TriggerContext:
     observed_for_seconds: int
     trigger_at: datetime = field(default_factory=utc_now)
     raw_signal: dict[str, Any] = field(default_factory=dict)
+    correlation_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -42,6 +43,10 @@ class DiagnosisResult:
     evidence: list[str]
     recommendations: list[str]
     confidence: float
+    related_objects: list[dict[str, Any]] = field(default_factory=list)
+    root_cause_candidates: list[dict[str, Any]] = field(default_factory=list)
+    evidence_timeline: list[dict[str, Any]] = field(default_factory=list)
+    impact_summary: dict[str, Any] = field(default_factory=dict)
     raw_agent_output: dict[str, Any] = field(default_factory=dict)
     used_fallback: bool = False
 
