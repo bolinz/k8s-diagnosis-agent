@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import logging
 from typing import Any
 
 from agent.analyzers.rules import RuleEngine
@@ -9,11 +10,17 @@ from agent.config.settings import Settings
 from agent.k8s_client.base import KubernetesReadClient
 from agent.models import DiagnosisResult, PendingFinding, TriggerContext, WorkloadRef
 from agent.orchestrator.codex_agent import CodexDiagnosisAgent
-from agent.reporting.diagnosis_reporter import (
-    DiagnosisReportFormatter,
-    KubernetesDiagnosisReportWriter,
+from agent.orchestrator.responses_client import (
+    ModelClient,
+    OllamaResponsesClient,
+    OpenAIResponsesClient,
 )
+from agent.reporting.diagnosis_reporter import DiagnosisReportFormatter, KubernetesDiagnosisReportWriter
+from agent.runtime_logging import get_logger, log_event
 from agent.tools.registry import ToolRegistry
+
+
+LOGGER = get_logger("agent_service")
 
 
 @dataclass
@@ -26,13 +33,32 @@ class AgentService:
     recent_events: dict[str, datetime] = field(default_factory=dict)
 
     def scan_once(self) -> list[dict]:
+        log_event(LOGGER, logging.INFO, "scan_start", "scheduled scan started")
         findings = self._collect_findings()
         results = []
         for finding in findings:
             results.append(self.process_trigger(finding.trigger))
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "scan_end",
+            "scheduled scan finished",
+            findings=len(findings),
+            reports=len(results),
+        )
         return results
 
     def process_alert(self, payload: dict) -> dict:
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "alert_received",
+            "alert webhook received",
+            namespace=payload.get("namespace", "default"),
+            workload_name=payload.get("name", payload.get("pod_name", "unknown")),
+            workload_kind=payload.get("kind", "Pod"),
+            symptom=payload.get("symptom", "Pending"),
+        )
         namespace = payload.get("namespace", "default")
         name = payload.get("name", payload.get("pod_name", "unknown"))
         kind = payload.get("kind", "Pod")
@@ -50,6 +76,17 @@ class AgentService:
         trigger = self._normalize_trigger(trigger)
         trigger = self._augment_trigger_signal(trigger)
         trigger = self._attach_correlation_context(trigger)
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "trigger_processing",
+            "processing trigger",
+            source=trigger.source,
+            namespace=trigger.workload.namespace,
+            workload_kind=trigger.workload.kind,
+            workload_name=trigger.workload.name,
+            symptom=trigger.symptom,
+        )
         registry = ToolRegistry(self.client, trigger)
         diagnosis = self._ensure_complete_diagnosis(
             trigger,
@@ -92,6 +129,16 @@ class AgentService:
         if seen is not None:
             delta = (now - seen).total_seconds()
             if delta < self.settings.event_dedupe_window_seconds:
+                log_event(
+                    LOGGER,
+                    logging.INFO,
+                    "event_deduped",
+                    "skipping duplicate event trigger",
+                    namespace=trigger.workload.namespace,
+                    workload_kind=trigger.workload.kind,
+                    workload_name=trigger.workload.name,
+                    symptom=trigger.symptom,
+                )
                 return None
         self.recent_events[key] = now
         return self.process_trigger(trigger)
@@ -776,15 +823,9 @@ class AgentService:
 
 def build_runtime_service(settings: Settings) -> AgentService:
     from agent.k8s_client.runtime import RuntimeKubernetesClient
-    from agent.orchestrator.responses_client import OpenAIResponsesClient
 
     client = RuntimeKubernetesClient(report_namespace=settings.report_namespace)
-    responses_client = OpenAIResponsesClient(
-        api_key=settings.openai_api_key or "",
-        model=settings.openai_model,
-        api_base_url=settings.api_base_url,
-        timeout_seconds=settings.request_timeout_seconds,
-    )
+    responses_client = build_model_client(settings)
     engine = RuleEngine(
         cluster_name=settings.cluster_name,
         min_observation_seconds=settings.min_observation_seconds,
@@ -807,3 +848,23 @@ def build_runtime_service(settings: Settings) -> AgentService:
         report_writer=writer,
     )
     return service
+
+
+def build_model_client(settings: Settings) -> ModelClient:
+    provider = settings.model_provider.lower()
+    if provider == "openai":
+        return OpenAIResponsesClient(
+            api_key=settings.openai_api_key or "",
+            model=settings.openai_model,
+            api_base_url=settings.api_base_url,
+            timeout_seconds=settings.request_timeout_seconds,
+        )
+    if provider == "ollama":
+        if not settings.ollama_model:
+            raise ValueError("OLLAMA_MODEL must be set when MODEL_PROVIDER=ollama")
+        return OllamaResponsesClient(
+            model=settings.ollama_model,
+            base_url=settings.ollama_base_url,
+            timeout_seconds=settings.request_timeout_seconds,
+        )
+    raise ValueError(f"Unsupported MODEL_PROVIDER: {settings.model_provider}")

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import threading
 import time
 
 from agent.config.settings import Settings
+from agent.runtime_logging import get_logger, log_event, setup_logging
 from agent.service import build_runtime_service
 from agent.triggers.event_watcher import EventWatcher
 from agent.triggers.scheduler import Scheduler
 from agent.ui.http_server import serve_http
+
+
+LOGGER = get_logger("app")
 
 
 def main() -> None:
@@ -19,6 +24,18 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = Settings.from_env()
+    setup_logging(settings.log_level)
+    log_event(
+        LOGGER,
+        logging.INFO,
+        "startup",
+        "starting k8s diagnosis agent",
+        provider=settings.model_provider,
+        model=settings.ollama_model if settings.model_provider == "ollama" else settings.openai_model,
+        base_url=settings.ollama_base_url if settings.model_provider == "ollama" else settings.api_base_url,
+        cluster=settings.cluster_name,
+        report_namespace=settings.report_namespace,
+    )
     service = build_runtime_service(settings)
 
     if args.command == "run-once":
