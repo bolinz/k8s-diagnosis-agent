@@ -20,7 +20,7 @@ def _iso(dt: datetime) -> str:
 
 @dataclass
 class DiagnosisReportFormatter:
-    analysis_version: str = "0.1.0"
+    analysis_version: str = "0.3.0"
 
     def build_spec(
         self,
@@ -63,6 +63,10 @@ class DiagnosisReportFormatter:
             "evidence": diagnosis.evidence,
             "recommendations": diagnosis.recommendations,
             "confidence": diagnosis.confidence,
+            "relatedObjects": diagnosis.related_objects,
+            "rootCauseCandidates": diagnosis.root_cause_candidates,
+            "evidenceTimeline": diagnosis.evidence_timeline,
+            "impactSummary": diagnosis.impact_summary,
             "analysisVersion": self.analysis_version,
             "modelInfo": {"name": model, "fallback": diagnosis.used_fallback},
             "rawSignal": raw_signal or {},

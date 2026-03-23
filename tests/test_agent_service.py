@@ -45,9 +45,54 @@ class FakeKubernetesClient:
         self.calls.append(("get_workload_events", namespace, kind, name))
         return {"items": [{"reason": "ProgressDeadlineExceeded", "message": "Deployment exceeded its progress deadline"}]}
 
+    def get_owner_chain(self, namespace, kind, name):
+        self.calls.append(("get_owner_chain", namespace, kind, name))
+        if kind == "Pod":
+            return {
+                "items": [
+                    {"kind": "Pod", "namespace": namespace, "name": name},
+                    {"kind": "ReplicaSet", "namespace": namespace, "name": "checkout-rs"},
+                    {"kind": "Deployment", "namespace": namespace, "name": "checkout"},
+                ]
+            }
+        return {"items": [{"kind": kind, "namespace": namespace, "name": name}]}
+
+    def get_related_events(self, namespace, kind, name):
+        self.calls.append(("get_related_events", namespace, kind, name))
+        return {
+            "items": [
+                {
+                    "reason": "BackOff" if kind == "Pod" else "ProgressDeadlineExceeded",
+                    "message": "Recent warning event",
+                    "timestamp": "2026-03-22T05:00:00+00:00",
+                }
+            ]
+        }
+
     def list_related_pods(self, namespace, kind, name):
         self.calls.append(("list_related_pods", namespace, kind, name))
-        return {"items": [{"metadata": {"name": name}}]}
+        return {"items": [{"metadata": {"name": "checkout-abc"}}, {"metadata": {"name": "checkout-def"}}]}
+
+    def get_attached_pvcs(self, namespace, pod_name):
+        self.calls.append(("get_attached_pvcs", namespace, pod_name))
+        return {
+            "items": [
+                {
+                    "name": "checkout-pvc",
+                    "phase": "Pending",
+                    "volumeName": "",
+                }
+            ]
+        }
+
+    def get_pvc_dependents(self, namespace, pvc_name):
+        self.calls.append(("get_pvc_dependents", namespace, pvc_name))
+        return {
+            "items": [
+                {"kind": "Pod", "namespace": namespace, "name": "checkout-abc", "phase": "Pending"},
+                {"kind": "Pod", "namespace": namespace, "name": "checkout-def", "phase": "Pending"},
+            ]
+        }
 
     def get_pod_events(self, namespace, pod_name):
         self.calls.append(("get_pod_events", namespace, pod_name))
@@ -136,6 +181,18 @@ class FakeKubernetesClient:
     def get_node_conditions(self, node_name=None):
         return {"items": []}
 
+    def get_node_workload_impact(self, node_name):
+        self.calls.append(("get_node_workload_impact", node_name))
+        return {
+            "node": node_name,
+            "podCount": 2,
+            "crossNamespace": False,
+            "items": [
+                {"kind": "Pod", "namespace": "payments", "name": "checkout-abc", "phase": "Pending"},
+                {"kind": "Pod", "namespace": "payments", "name": "checkout-def", "phase": "Pending"},
+            ],
+        }
+
     def get_namespace_quotas(self, namespace):
         return {"items": []}
 
@@ -146,6 +203,10 @@ class FakeKubernetesClient:
         return {"status": "unavailable"}
 
     def search_similar_reports(self, trigger):
+        return {"items": []}
+
+    def get_related_reports(self, namespace, kind, name):
+        self.calls.append(("get_related_reports", namespace, kind, name))
         return {"items": []}
 
     def list_reports(self):
@@ -168,7 +229,31 @@ class FakeKubernetesClient:
                     "evidence": ["Container logs contain missing DATABASE_URL."],
                     "recommendations": ["Restore secret wiring."],
                     "confidence": 0.93,
-                    "analysisVersion": "0.1.0",
+                    "relatedObjects": [
+                        {"kind": "Pod", "namespace": "payments", "name": "checkout-abc", "role": "primary"},
+                        {"kind": "Deployment", "namespace": "payments", "name": "checkout", "role": "owner"},
+                    ],
+                    "rootCauseCandidates": [
+                        {
+                            "objectRef": {"kind": "Deployment", "namespace": "payments", "name": "checkout"},
+                            "reason": "Shared deployment rollout is broken.",
+                            "confidence": 0.82,
+                        }
+                    ],
+                    "evidenceTimeline": [
+                        {
+                            "time": "2026-03-22T05:00:00+00:00",
+                            "objectRef": {"kind": "Pod", "namespace": "payments", "name": "checkout-abc"},
+                            "signal": "BackOff",
+                        }
+                    ],
+                    "impactSummary": {
+                        "workloadCount": 1,
+                        "podCount": 1,
+                        "crossNamespace": False,
+                        "relatedReportCount": 0,
+                    },
+                    "analysisVersion": "0.3.0",
                     "modelInfo": {"name": "gpt-5-codex", "fallback": False},
                     "rawSignal": {
                         "reason": "BackOff",
@@ -207,6 +292,18 @@ def build_settings() -> Settings:
         diagnosis_name_prefix="diagnosis",
         event_dedupe_window_seconds=300,
         workload_name="k8s-diagnosis-agent",
+    )
+
+
+def build_fallback_agent() -> CodexDiagnosisAgent:
+    client = FakeResponsesClient([])
+    client.api_key = ""
+    return CodexDiagnosisAgent(
+        responses_client=client,
+        rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
     )
 
 
@@ -250,9 +347,23 @@ def test_tool_registry_exposes_new_read_only_tools_without_secret_values():
             {"namespace": "payments", "pod_name": "checkout-abc"},
         )
     )
+    owner_chain = json.loads(
+        registry.execute(
+            "get_owner_chain",
+            {"namespace": "payments", "kind": "Pod", "name": "checkout-abc"},
+        )
+    )
+    node_impact = json.loads(
+        registry.execute(
+            "get_node_workload_impact",
+            {"node_name": "node-a"},
+        )
+    )
     assert config_refs["items"][0]["name"] == "checkout-env"
     assert "value" not in json.dumps(config_refs)
     assert pvc_status["items"][0]["phase"] == "Pending"
+    assert owner_chain["items"][-1]["kind"] == "Deployment"
+    assert node_impact["podCount"] == 2
 
 
 def test_codex_agent_handles_function_call_then_structured_result():
@@ -419,8 +530,10 @@ def test_service_lists_and_reads_reports():
     assert report["workload"]["name"] == "checkout-abc"
     assert report["cluster"] == "prod"
     assert report["triggerAt"]
-    assert report["analysisVersion"] == "0.1.0"
+    assert report["analysisVersion"] == "0.3.0"
     assert report["rawSignal"]["podPhase"] == "Running"
+    assert report["relatedObjects"][0]["role"] == "primary"
+    assert report["rootCauseCandidates"][0]["objectRef"]["kind"] == "Deployment"
     assert service.get_report("missing") is None
 
 
@@ -676,7 +789,7 @@ def test_service_normalizes_report_metadata_without_unknown_placeholders():
                         "evidence": ["reason=BackOff"],
                         "recommendations": ["Inspect logs."],
                         "confidence": 0.6,
-                        "analysisVersion": "0.1.0",
+                        "analysisVersion": "0.3.0",
                         "modelInfo": {},
                         "rawSignal": {
                             "reason": "BackOff",
@@ -758,6 +871,90 @@ def test_process_trigger_normalizes_event_metadata_before_writing():
     assert report["status"]["modelInfo"]["name"] == "gpt-5-codex"
     assert report["status"]["rawSignal"]["reason"] == "BackOff"
     assert report["status"]["rawSignal"]["timestamp"]
+
+
+def test_process_trigger_builds_correlation_for_pvc_propagation():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    report = service.process_trigger(
+        TriggerContext(
+            source="event",
+            cluster="prod",
+            workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+            symptom="FailedMount",
+            observed_for_seconds=1200,
+            raw_signal={"reason": "FailedMount", "message": "Unable to attach or mount volumes"},
+        )
+    )
+    assert any(item["kind"] == "PVC" for item in report["status"]["relatedObjects"])
+    assert report["status"]["rootCauseCandidates"][0]["objectRef"]["kind"] == "PVC"
+    assert report["status"]["impactSummary"]["podCount"] >= 2
+
+
+def test_process_trigger_builds_correlation_for_node_scoped_impact():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    report = service.process_trigger(
+        TriggerContext(
+            source="scheduled",
+            cluster="prod",
+            workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+            symptom="Pending",
+            observed_for_seconds=1800,
+        )
+    )
+    assert any(item["kind"] == "Node" for item in report["status"]["relatedObjects"])
+    assert any(
+        item["objectRef"]["kind"] == "Node"
+        for item in report["status"]["rootCauseCandidates"]
+    )
+
+
+def test_process_trigger_builds_correlation_for_rollout_stuck():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    report = service.process_trigger(
+        TriggerContext(
+            source="scheduled",
+            cluster="prod",
+            workload=WorkloadRef(kind="Deployment", namespace="payments", name="checkout"),
+            symptom="ProgressDeadlineExceeded",
+            observed_for_seconds=1800,
+        )
+    )
+    assert report["status"]["rootCauseCandidates"][0]["objectRef"]["kind"] == "Deployment"
+    assert report["status"]["evidenceTimeline"][0]["signal"]
+
+
+def test_process_trigger_builds_correlation_for_shared_image_breakage():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    report = service.process_trigger(
+        TriggerContext(
+            source="event",
+            cluster="prod",
+            workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+            symptom="ImagePullBackOff",
+            observed_for_seconds=900,
+            raw_signal={"reason": "Failed", "message": "image pull failed"},
+        )
+    )
+    assert any(
+        item["objectRef"]["kind"] in {"Deployment", "ReplicaSet"}
+        for item in report["status"]["rootCauseCandidates"]
+    )
 
 
 def test_process_trigger_enriches_raw_signal_for_pod_symptoms():

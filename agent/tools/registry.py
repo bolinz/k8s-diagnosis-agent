@@ -80,10 +80,50 @@ class ToolRegistry:
                 handler=lambda args: self.client.get_workload_events(**args),
             ),
             RegisteredTool(
+                name="get_owner_chain",
+                description="Get the owner chain for a Kubernetes object such as Pod -> ReplicaSet -> Deployment.",
+                parameters=workload_defaults,
+                handler=lambda args: self.client.get_owner_chain(**args),
+            ),
+            RegisteredTool(
+                name="get_related_events",
+                description="Get a bounded recent event summary for a Kubernetes object.",
+                parameters=workload_defaults,
+                handler=lambda args: self.client.get_related_events(**args),
+            ),
+            RegisteredTool(
                 name="list_related_pods",
                 description="List pods related to the target workload.",
                 parameters=workload_defaults,
                 handler=lambda args: self.client.list_related_pods(**args),
+            ),
+            RegisteredTool(
+                name="get_attached_pvcs",
+                description="List PVCs mounted by the target pod with summarized binding state.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "pod_name": {"type": "string"},
+                    },
+                    "required": ["namespace", "pod_name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_attached_pvcs(**args),
+            ),
+            RegisteredTool(
+                name="get_pvc_dependents",
+                description="List pods in the namespace that currently mount the target PVC.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "pvc_name": {"type": "string"},
+                    },
+                    "required": ["namespace", "pvc_name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_pvc_dependents(**args),
             ),
             RegisteredTool(
                 name="get_pod_events",
@@ -209,6 +249,19 @@ class ToolRegistry:
                 handler=lambda args: self.client.get_node_conditions(**args),
             ),
             RegisteredTool(
+                name="get_node_workload_impact",
+                description="Summarize pods currently scheduled on a node to estimate workload blast radius.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "node_name": {"type": "string"},
+                    },
+                    "required": ["node_name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_node_workload_impact(**args),
+            ),
+            RegisteredTool(
                 name="get_namespace_quotas",
                 description="Inspect namespace resource quotas and usage.",
                 parameters={
@@ -258,5 +311,11 @@ class ToolRegistry:
                     "additionalProperties": False,
                 },
                 handler=lambda _args: self.client.search_similar_reports(self.trigger),
+            ),
+            RegisteredTool(
+                name="get_related_reports",
+                description="List prior DiagnosisReport objects for the same workload.",
+                parameters=workload_defaults,
+                handler=lambda args: self.client.get_related_reports(**args),
             ),
         ]

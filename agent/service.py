@@ -49,9 +49,11 @@ class AgentService:
     def process_trigger(self, trigger: TriggerContext) -> dict:
         trigger = self._normalize_trigger(trigger)
         trigger = self._augment_trigger_signal(trigger)
+        trigger = self._attach_correlation_context(trigger)
         registry = ToolRegistry(self.client, trigger)
         diagnosis = self._ensure_complete_diagnosis(
-            trigger, self.codex_agent.diagnose(trigger, registry)
+            trigger,
+            self.codex_agent.diagnose(trigger, registry),
         )
         writer = self.report_writer
         if writer is None:
@@ -178,6 +180,10 @@ class AgentService:
             "evidence": status.get("evidence", []),
             "recommendations": status.get("recommendations", []),
             "confidence": status.get("confidence", 0.0),
+            "relatedObjects": status.get("relatedObjects", []),
+            "rootCauseCandidates": status.get("rootCauseCandidates", []),
+            "evidenceTimeline": status.get("evidenceTimeline", []),
+            "impactSummary": status.get("impactSummary", {}),
             "lastAnalyzedAt": status.get("lastAnalyzedAt", ""),
             "analysisVersion": status.get("analysisVersion", ""),
             "modelInfo": status.get("modelInfo", {}),
@@ -198,6 +204,7 @@ class AgentService:
         diagnosis: DiagnosisResult,
     ) -> DiagnosisResult:
         fallback = self.codex_agent.rule_engine.fallback_diagnosis(trigger)
+        correlation = trigger.correlation_context or {}
         summary = diagnosis.summary.strip() if diagnosis.summary else ""
         if not summary or summary == "Diagnosis incomplete":
             summary = self._fallback_summary(trigger)
@@ -208,6 +215,12 @@ class AgentService:
             evidence=diagnosis.evidence or self._fallback_evidence(trigger),
             recommendations=diagnosis.recommendations or fallback.recommendations,
             confidence=diagnosis.confidence if diagnosis.confidence > 0 else fallback.confidence,
+            related_objects=diagnosis.related_objects or correlation.get("relatedObjects", []),
+            root_cause_candidates=diagnosis.root_cause_candidates
+            or correlation.get("rootCauseCandidates", []),
+            evidence_timeline=diagnosis.evidence_timeline
+            or correlation.get("evidenceTimeline", []),
+            impact_summary=diagnosis.impact_summary or correlation.get("impactSummary", {}),
             raw_agent_output=diagnosis.raw_agent_output,
             used_fallback=diagnosis.used_fallback
             or not diagnosis.summary
@@ -245,6 +258,23 @@ class AgentService:
         }
         raw_signal = normalized.get("rawSignal")
         normalized["rawSignal"] = raw_signal if isinstance(raw_signal, dict) else {}
+        normalized["relatedObjects"] = [
+            item
+            for item in normalized.get("relatedObjects", [])
+            if isinstance(item, dict)
+        ]
+        normalized["rootCauseCandidates"] = [
+            item
+            for item in normalized.get("rootCauseCandidates", [])
+            if isinstance(item, dict)
+        ]
+        normalized["evidenceTimeline"] = [
+            item
+            for item in normalized.get("evidenceTimeline", [])
+            if isinstance(item, dict)
+        ]
+        impact = normalized.get("impactSummary", {})
+        normalized["impactSummary"] = impact if isinstance(impact, dict) else {}
         return normalized
 
     def _augment_trigger_signal(self, trigger: TriggerContext) -> TriggerContext:
@@ -300,6 +330,19 @@ class AgentService:
             observed_for_seconds=trigger.observed_for_seconds,
             trigger_at=trigger.trigger_at,
             raw_signal=raw_signal,
+            correlation_context=trigger.correlation_context,
+        )
+
+    def _attach_correlation_context(self, trigger: TriggerContext) -> TriggerContext:
+        return TriggerContext(
+            source=trigger.source,
+            cluster=trigger.cluster,
+            workload=trigger.workload,
+            symptom=trigger.symptom,
+            observed_for_seconds=trigger.observed_for_seconds,
+            trigger_at=trigger.trigger_at,
+            raw_signal=trigger.raw_signal,
+            correlation_context=self._build_correlation_context(trigger),
         )
 
     def _fallback_summary(self, trigger: TriggerContext) -> str:
@@ -353,6 +396,7 @@ class AgentService:
             observed_for_seconds=trigger.observed_for_seconds,
             trigger_at=trigger.trigger_at,
             raw_signal=raw_signal,
+            correlation_context=trigger.correlation_context,
         )
 
     def _normalize_event_signal(self, trigger: TriggerContext) -> dict[str, Any]:
@@ -392,6 +436,12 @@ class AgentService:
             symptom=spec.get("symptom", "Pending"),
             observed_for_seconds=int(spec.get("observedFor", 0)),
             raw_signal=status.get("rawSignal", {}),
+            correlation_context={
+                "relatedObjects": status.get("relatedObjects", []),
+                "rootCauseCandidates": status.get("rootCauseCandidates", []),
+                "evidenceTimeline": status.get("evidenceTimeline", []),
+                "impactSummary": status.get("impactSummary", {}),
+            },
         ))
 
     def _raw_signal_summary(self, raw_signal: dict) -> dict:
@@ -413,6 +463,315 @@ class AgentService:
             if value:
                 summary[key] = value
         return summary
+
+    def _build_correlation_context(self, trigger: TriggerContext) -> dict[str, Any]:
+        related_objects: list[dict[str, Any]] = []
+        root_candidates: list[dict[str, Any]] = []
+        evidence_timeline: list[dict[str, Any]] = []
+
+        self._append_related_object(
+            related_objects,
+            trigger.workload.kind,
+            trigger.workload.namespace,
+            trigger.workload.name,
+            "primary",
+        )
+
+        if trigger.workload.kind.lower() == "pod":
+            self._collect_pod_correlation(trigger, related_objects, root_candidates, evidence_timeline)
+        else:
+            self._collect_workload_correlation(trigger, related_objects, root_candidates, evidence_timeline)
+
+        reports = self.client.get_related_reports(
+            namespace=trigger.workload.namespace,
+            kind=trigger.workload.kind,
+            name=trigger.workload.name,
+        )
+        report_items = reports.get("items", []) if isinstance(reports, dict) else []
+        impact_summary = {
+            "workloadCount": len(
+                {
+                    (
+                        item.get("namespace", ""),
+                        item.get("kind", ""),
+                        item.get("name", ""),
+                    )
+                    for item in related_objects
+                    if item.get("kind") not in {"PVC", "Node", "DiagnosisReport"}
+                }
+            ),
+            "podCount": len([item for item in related_objects if item.get("kind") == "Pod"]),
+            "crossNamespace": len({item.get("namespace", "") for item in related_objects if item.get("namespace")}) > 1,
+            "relatedReportCount": len(report_items),
+        }
+        root_candidates = self._prioritize_root_candidates(trigger.symptom, root_candidates)
+        evidence_timeline.sort(key=lambda item: item.get("time", ""))
+        return {
+            "relatedObjects": related_objects,
+            "rootCauseCandidates": root_candidates[:3],
+            "evidenceTimeline": evidence_timeline[:10],
+            "impactSummary": impact_summary,
+        }
+
+    def _collect_pod_correlation(
+        self,
+        trigger: TriggerContext,
+        related_objects: list[dict[str, Any]],
+        root_candidates: list[dict[str, Any]],
+        evidence_timeline: list[dict[str, Any]],
+    ) -> None:
+        owner_chain = self.client.get_owner_chain(
+            namespace=trigger.workload.namespace,
+            kind=trigger.workload.kind,
+            name=trigger.workload.name,
+        )
+        owners = owner_chain.get("items", []) if isinstance(owner_chain, dict) else []
+        for item in owners[1:]:
+            self._append_related_object(
+                related_objects,
+                item.get("kind", ""),
+                item.get("namespace", trigger.workload.namespace),
+                item.get("name", ""),
+                "owner",
+            )
+
+        events = self.client.get_related_events(
+            namespace=trigger.workload.namespace,
+            kind="Pod",
+            name=trigger.workload.name,
+        )
+        self._append_timeline(evidence_timeline, events.get("items", []), trigger.workload)
+
+        spec = self.client.get_pod_spec_summary(
+            namespace=trigger.workload.namespace,
+            pod_name=trigger.workload.name,
+        )
+        node_name = spec.get("nodeName") if isinstance(spec, dict) else None
+        if node_name:
+            self._append_related_object(related_objects, "Node", "", node_name, "upstream-suspect")
+            impact = self.client.get_node_workload_impact(node_name=node_name)
+            if impact.get("podCount", 0) > 1:
+                self._append_root_candidate(
+                    root_candidates,
+                    "Node",
+                    "",
+                    node_name,
+                    f"Node {node_name} currently affects multiple pods on the same host.",
+                    0.72,
+                )
+
+        pvcs = self.client.get_attached_pvcs(
+            namespace=trigger.workload.namespace,
+            pod_name=trigger.workload.name,
+        )
+        for item in pvcs.get("items", []) if isinstance(pvcs, dict) else []:
+            self._append_related_object(
+                related_objects,
+                "PVC",
+                trigger.workload.namespace,
+                item.get("name", ""),
+                "upstream-suspect" if trigger.symptom == "FailedMount" else "affected",
+            )
+            if item.get("phase") and item.get("phase") != "Bound":
+                self._append_root_candidate(
+                    root_candidates,
+                    "PVC",
+                    trigger.workload.namespace,
+                    item.get("name", ""),
+                    f"PVC {item.get('name', '')} is {item.get('phase')} and may block pod startup.",
+                    0.85,
+                )
+                dependents = self.client.get_pvc_dependents(
+                    namespace=trigger.workload.namespace,
+                    pvc_name=item.get("name", ""),
+                )
+                for dependent in dependents.get("items", []) if isinstance(dependents, dict) else []:
+                    self._append_related_object(
+                        related_objects,
+                        dependent.get("kind", "Pod"),
+                        dependent.get("namespace", trigger.workload.namespace),
+                        dependent.get("name", ""),
+                        "affected",
+                    )
+
+        if trigger.symptom in {
+            "ImagePullBackOff",
+            "ErrImagePull",
+            "CreateContainerConfigError",
+            "ContainerCannotRun",
+        }:
+            owner = next(
+                (item for item in owners if item.get("kind") in {"Deployment", "ReplicaSet", "StatefulSet", "DaemonSet"}),
+                None,
+            )
+            if owner:
+                pods = self.client.list_related_pods(
+                    namespace=trigger.workload.namespace,
+                    kind=owner.get("kind", ""),
+                    name=owner.get("name", ""),
+                )
+                pod_items = pods.get("items", []) if isinstance(pods, dict) else []
+                if len(pod_items) > 1:
+                    self._append_root_candidate(
+                        root_candidates,
+                        owner.get("kind", ""),
+                        trigger.workload.namespace,
+                        owner.get("name", ""),
+                        f"Multiple pods owned by {owner.get('kind', '')}/{owner.get('name', '')} show the same startup failure pattern.",
+                        0.78,
+                    )
+                    for pod in pod_items:
+                        metadata = pod.get("metadata", {})
+                        self._append_related_object(
+                            related_objects,
+                            "Pod",
+                            trigger.workload.namespace,
+                            metadata.get("name", ""),
+                            "affected",
+                        )
+
+    def _collect_workload_correlation(
+        self,
+        trigger: TriggerContext,
+        related_objects: list[dict[str, Any]],
+        root_candidates: list[dict[str, Any]],
+        evidence_timeline: list[dict[str, Any]],
+    ) -> None:
+        events = self.client.get_related_events(
+            namespace=trigger.workload.namespace,
+            kind=trigger.workload.kind,
+            name=trigger.workload.name,
+        )
+        self._append_timeline(evidence_timeline, events.get("items", []), trigger.workload)
+
+        pods = self.client.list_related_pods(
+            namespace=trigger.workload.namespace,
+            kind=trigger.workload.kind,
+            name=trigger.workload.name,
+        )
+        for item in pods.get("items", []) if isinstance(pods, dict) else []:
+            metadata = item.get("metadata", {})
+            self._append_related_object(
+                related_objects,
+                "Pod",
+                trigger.workload.namespace,
+                metadata.get("name", ""),
+                "affected",
+            )
+
+        if trigger.workload.kind.lower() == "deployment":
+            status = self.client.get_deployment_status(
+                namespace=trigger.workload.namespace,
+                name=trigger.workload.name,
+            )
+            conditions = status.get("conditions", []) if isinstance(status, dict) else []
+            condition = next(
+                (
+                    item.get("reason") or item.get("type")
+                    for item in conditions
+                    if item.get("reason") or item.get("type")
+                ),
+                "",
+            )
+            if condition:
+                self._append_root_candidate(
+                    root_candidates,
+                    "Deployment",
+                    trigger.workload.namespace,
+                    trigger.workload.name,
+                    f"Deployment condition {condition} indicates rollout is blocked.",
+                    0.82,
+                )
+
+    def _append_timeline(
+        self,
+        timeline: list[dict[str, Any]],
+        events: list[dict[str, Any]],
+        workload: WorkloadRef,
+    ) -> None:
+        for item in events[:10]:
+            signal = item.get("reason") or item.get("message") or item.get("type") or ""
+            timestamp = item.get("timestamp") or ""
+            if not signal:
+                continue
+            timeline.append(
+                {
+                    "time": timestamp,
+                    "objectRef": {
+                        "kind": workload.kind,
+                        "namespace": workload.namespace,
+                        "name": workload.name,
+                    },
+                    "signal": signal,
+                }
+            )
+
+    def _append_related_object(
+        self,
+        items: list[dict[str, Any]],
+        kind: str,
+        namespace: str,
+        name: str,
+        role: str,
+    ) -> None:
+        if not kind or not name:
+            return
+        candidate = {
+            "kind": kind,
+            "namespace": namespace,
+            "name": name,
+            "role": role,
+        }
+        if candidate not in items:
+            items.append(candidate)
+
+    def _append_root_candidate(
+        self,
+        items: list[dict[str, Any]],
+        kind: str,
+        namespace: str,
+        name: str,
+        reason: str,
+        confidence: float,
+    ) -> None:
+        if not kind or not name or not reason:
+            return
+        candidate = {
+            "objectRef": {
+                "kind": kind,
+                "namespace": namespace,
+                "name": name,
+            },
+            "reason": reason,
+            "confidence": confidence,
+        }
+        if candidate not in items:
+            items.append(candidate)
+
+    def _prioritize_root_candidates(
+        self,
+        symptom: str,
+        items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        preferred = {
+            "FailedMount": ["PVC", "Pod", "Node"],
+            "ProgressDeadlineExceeded": ["Deployment", "ReplicaSet", "Pod"],
+            "ReplicaMismatch": ["Deployment", "ReplicaSet", "Pod"],
+            "ImagePullBackOff": ["Deployment", "ReplicaSet", "Pod", "Node"],
+            "ErrImagePull": ["Deployment", "ReplicaSet", "Pod", "Node"],
+            "CreateContainerConfigError": ["Deployment", "ReplicaSet", "Pod", "Node"],
+            "ContainerCannotRun": ["Deployment", "ReplicaSet", "Pod", "Node"],
+        }.get(symptom, [])
+
+        def rank(item: dict[str, Any]) -> tuple[int, float]:
+            kind = item.get("objectRef", {}).get("kind", "")
+            try:
+                index = preferred.index(kind)
+            except ValueError:
+                index = len(preferred)
+            return (index, -float(item.get("confidence", 0.0)))
+
+        return sorted(items, key=rank)
 
 
 def build_runtime_service(settings: Settings) -> AgentService:

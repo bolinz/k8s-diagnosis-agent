@@ -78,9 +78,25 @@ spec:
                     type: string
                 confidence:
                   type: number
+                relatedObjects:
+                  type: array
+                  items:
+                    type: object
+                rootCauseCandidates:
+                  type: array
+                  items:
+                    type: object
+                evidenceTimeline:
+                  type: array
+                  items:
+                    type: object
+                impactSummary:
+                  type: object
                 analysisVersion:
                   type: string
                 modelInfo:
+                  type: object
+                rawSignal:
                   type: object
                 lastAnalyzedAt:
                   type: string
