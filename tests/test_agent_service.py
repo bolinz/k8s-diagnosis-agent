@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import timezone
+from datetime import datetime, timezone
 
 from agent.analyzers.rules import RuleEngine
 from agent.config.settings import Settings
@@ -419,6 +419,32 @@ def test_tool_registry_exposes_new_read_only_tools_without_secret_values():
     assert pvc_status["items"][0]["phase"] == "Pending"
     assert owner_chain["items"][-1]["kind"] == "Deployment"
     assert node_impact["podCount"] == 2
+
+
+def test_tool_registry_serializes_datetime_values():
+    client = FakeKubernetesClient()
+    client.get_workload_status = lambda namespace, kind, name: {
+        "namespace": namespace,
+        "kind": kind,
+        "name": name,
+        "timestamp": datetime(2026, 3, 23, 12, 0, tzinfo=timezone.utc),
+    }
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="CrashLoopBackOff",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(client, trigger)
+    payload = json.loads(
+        registry.execute(
+            "get_workload_status",
+            {"namespace": "payments", "kind": "Pod", "name": "checkout-abc"},
+        )
+    )
+
+    assert payload["timestamp"] == "2026-03-23T12:00:00+00:00"
 
 
 def test_codex_agent_handles_function_call_then_structured_result():
