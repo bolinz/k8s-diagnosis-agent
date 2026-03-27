@@ -5,20 +5,20 @@ Goal: broaden diagnosis coverage with controlled scope and no architecture chang
 
 ## Backlog
 
-- [ ] Symptom: refine `FailedScheduling` into resource shortage vs. constraint mismatch
-  - [ ] Rule mapping and fallback recommendations
-  - [ ] Event mapping for common scheduler messages
-  - [ ] Unit tests for both branches
+- [x] Symptom: refine `FailedScheduling` into resource shortage vs. constraint mismatch
+  - [x] Rule mapping and fallback recommendations
+  - [x] Event mapping for common scheduler messages
+  - [x] Unit tests for both branches
 
-- [ ] Symptom: refine `FailedMount` into PVC unbound vs. missing Secret/ConfigMap
-  - [ ] Rule mapping and fallback recommendations
-  - [ ] Event/message parser updates
-  - [ ] Unit tests for both branches
+- [x] Symptom: refine `FailedMount` into PVC unbound vs. missing Secret/ConfigMap
+  - [x] Rule mapping and fallback recommendations
+  - [x] Event/message parser updates
+  - [x] Unit tests for both branches
 
-- [ ] Symptom: refine image-pull class into auth vs. not-found vs. network error
-  - [ ] Reason/message signatures
-  - [ ] Recommendation templates by subtype
-  - [ ] Unit tests for subtype mapping
+- [x] Symptom: refine image-pull class into auth vs. not-found vs. network error
+  - [x] Reason/message signatures
+  - [x] Recommendation templates by subtype
+  - [x] Unit tests for subtype mapping
 
 - [ ] Tool: add `get_namespace_events(namespace)`
   - [ ] Read-only bounded response (count + time window)

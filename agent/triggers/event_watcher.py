@@ -80,7 +80,11 @@ def map_event_to_trigger(cluster: str, event: dict) -> TriggerContext | None:
         symptom = "CreateContainerConfigError"
     elif "imagepullbackoff" in message or reason == "ImagePullBackOff":
         symptom = "ImagePullBackOff"
-    elif "errimagepull" in message or reason == "ErrImagePull":
+    elif (
+        "errimagepull" in message
+        or reason == "ErrImagePull"
+        or (reason == "Failed" and "failed to pull image" in message)
+    ):
         symptom = "ErrImagePull"
     elif "oomkilled" in message:
         symptom = "OOMKilled"

@@ -674,6 +674,24 @@ def test_event_mapping_and_dedupe():
     assert failed_scheduling.symptom == "Pending"
     assert "Insufficient cpu" in failed_scheduling.raw_signal["message"]
 
+    failed_image_pull = map_event_to_trigger(
+        "prod",
+        {
+            "type": "Warning",
+            "reason": "Failed",
+            "message": "Failed to pull image \"priv-registry/app:1.2\": unauthorized: authentication required",
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "payments",
+                "name": "checkout-abc",
+            },
+            "lastTimestamp": "2026-03-22T05:00:02Z",
+        },
+    )
+    assert failed_image_pull is not None
+    assert failed_image_pull.symptom == "ErrImagePull"
+    assert "Failed to pull image" in failed_image_pull.raw_signal["message"]
+
     cannot_run = map_event_to_trigger(
         "prod",
         {

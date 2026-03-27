@@ -83,13 +83,39 @@ class RuleEngine:
             ]
         elif symptom in {"ImagePullBackOff", "ErrImagePull"}:
             severity = "critical"
-            probable_causes = [
-                "Container image tag is missing or registry access is denied"
-            ]
-            recommendations = [
-                "Verify the image reference and imagePullSecrets",
-                "Confirm the target registry is reachable from the cluster",
-            ]
+            subtype = _classify_image_pull_issue(lower_message)
+            if subtype == "auth":
+                probable_causes = [
+                    "Registry authentication failed while pulling the container image"
+                ]
+                recommendations = [
+                    "Verify imagePullSecrets, registry credentials, and service account secret references",
+                    "Confirm the registry repository permissions include pull access",
+                ]
+            elif subtype == "not_found":
+                probable_causes = [
+                    "The image name or tag is invalid, or the referenced artifact does not exist"
+                ]
+                recommendations = [
+                    "Verify image repository and tag/digest exactly match published artifacts",
+                    "Confirm the image exists in the target registry and has not been deleted",
+                ]
+            elif subtype == "network":
+                probable_causes = [
+                    "Network, DNS, or TLS connectivity to the registry failed during image pull"
+                ]
+                recommendations = [
+                    "Check node egress, DNS resolution, proxy/firewall rules, and registry TLS configuration",
+                    "Confirm the registry endpoint is reachable from cluster nodes",
+                ]
+            else:
+                probable_causes = [
+                    "Container image pull failed due to invalid image reference, auth, or registry connectivity"
+                ]
+                recommendations = [
+                    "Verify the image reference and imagePullSecrets",
+                    "Confirm the target registry is reachable from the cluster",
+                ]
         elif symptom == "OOMKilled":
             severity = "critical"
             probable_causes = ["Container memory limit is lower than runtime demand"]
@@ -211,3 +237,19 @@ class RuleEngine:
             used_fallback=True,
             raw_agent_output={"mode": "fallback"},
         )
+
+
+def _classify_image_pull_issue(lower_message: str) -> str:
+    if any(
+        token in lower_message
+        for token in {"unauthorized", "authentication required", "denied", "forbidden", "no basic auth credentials"}
+    ):
+        return "auth"
+    if any(token in lower_message for token in {"manifest unknown", "not found", "name unknown", "pull access denied"}):
+        return "not_found"
+    if any(
+        token in lower_message
+        for token in {"i/o timeout", "context deadline exceeded", "connection refused", "no such host", "tls handshake timeout", "temporary failure"}
+    ):
+        return "network"
+    return "generic"
