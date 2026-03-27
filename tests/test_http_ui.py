@@ -21,6 +21,9 @@ def test_ui_template_contains_expected_sections():
     assert "Primary Finding" in INDEX_HTML
     assert "Related Objects" in INDEX_HTML
     assert "Evidence Timeline" in INDEX_HTML
+    assert 'id="filter-category"' in INDEX_HTML
+    assert "populateCategories(" in INDEX_HTML
+    assert "Primary Signal" in INDEX_HTML
 
 
 def test_service_api_shape_matches_ui_expectations():
@@ -53,6 +56,8 @@ def test_service_api_shape_matches_ui_expectations():
     assert detail["recommendations"]
     assert detail["rawSignal"]["reason"] == "BackOff"
     assert detail["rawSignal"]["containerReason"] == "CrashLoopBackOff"
+    assert detail["category"] == "runtime"
+    assert detail["primarySignal"] == "BackOff"
     assert detail["relatedObjects"]
     assert detail["rootCauseCandidates"]
     assert detail["evidenceTimeline"]

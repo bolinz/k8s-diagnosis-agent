@@ -672,12 +672,20 @@ def test_formatter_dedupes_report_name_and_targets_report_namespace_shape():
         "k8s-diagnosis-system",
         trigger,
     )
-    status = formatter.build_status(engine_result(), "gpt-5-codex", raw_signal={"reason": "BackOff"})
+    status = formatter.build_status(
+        engine_result(),
+        "gpt-5-codex",
+        raw_signal={"reason": "BackOff"},
+        category="runtime",
+        primary_signal="BackOff",
+    )
     assert body["metadata"]["name"].startswith("diagnosis-")
     assert body["metadata"]["namespace"] == "k8s-diagnosis-system"
     assert body["spec"]["triggerAt"].endswith("+00:00")
     assert status["modelInfo"]["name"] == "gpt-5-codex"
     assert status["rawSignal"]["reason"] == "BackOff"
+    assert status["category"] == "runtime"
+    assert status["primarySignal"] == "BackOff"
 
 
 def test_service_lists_and_reads_reports():
@@ -695,6 +703,8 @@ def test_service_lists_and_reads_reports():
     reports = service.list_reports()
     assert reports[0]["name"] == "diagnosis-a"
     assert reports[0]["severity"] == "critical"
+    assert reports[0]["category"] == "runtime"
+    assert reports[0]["primarySignal"] == "BackOff"
     report = service.get_report("diagnosis-a")
     assert report["workload"]["name"] == "checkout-abc"
     assert report["cluster"] == "prod"
@@ -703,7 +713,28 @@ def test_service_lists_and_reads_reports():
     assert report["rawSignal"]["podPhase"] == "Running"
     assert report["relatedObjects"][0]["role"] == "primary"
     assert report["rootCauseCandidates"][0]["objectRef"]["kind"] == "Deployment"
+    assert report["category"] == "runtime"
+    assert report["primarySignal"] == "BackOff"
     assert service.get_report("missing") is None
+
+
+def test_service_list_reports_supports_category_filter():
+    client = FakeKubernetesClient()
+    settings = build_settings()
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient([]),
+        rule_engine=engine,
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    service = AgentService(settings=settings, client=client, codex_agent=agent)
+    runtime_reports = service.list_reports({"category": ["runtime"]})
+    image_reports = service.list_reports({"category": ["image"]})
+    assert len(runtime_reports) == 1
+    assert runtime_reports[0]["name"] == "diagnosis-a"
+    assert image_reports == []
 
 
 def test_event_mapping_and_dedupe():
@@ -928,8 +959,8 @@ def test_backfill_rewrites_incomplete_reports():
         def __init__(self):
             self.calls = []
 
-        def upsert_report(self, trigger, diagnosis, model, prefix):
-            self.calls.append((trigger, diagnosis, model, prefix))
+        def upsert_report(self, trigger, diagnosis, model, prefix, category="", primary_signal=""):
+            self.calls.append((trigger, diagnosis, model, prefix, category, primary_signal))
             return {"ok": True}
 
     class IncompleteClient(FakeKubernetesClient):

@@ -100,5 +100,13 @@ class KubernetesReadClient(Protocol):
 
 
 class DiagnosisReportWriter(Protocol):
-    def upsert_report(self, trigger: TriggerContext, diagnosis: dict) -> dict:
+    def upsert_report(
+        self,
+        trigger: TriggerContext,
+        diagnosis: dict,
+        model: str,
+        prefix: str,
+        category: str = "",
+        primary_signal: str = "",
+    ) -> dict:
         ...

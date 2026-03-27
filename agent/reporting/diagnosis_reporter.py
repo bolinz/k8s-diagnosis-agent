@@ -59,6 +59,8 @@ class DiagnosisReportFormatter:
         diagnosis: DiagnosisResult,
         model: str,
         raw_signal: dict[str, Any] | None = None,
+        category: str | None = None,
+        primary_signal: str | None = None,
     ) -> dict[str, Any]:
         return {
             "phase": "Analyzed",
@@ -75,6 +77,8 @@ class DiagnosisReportFormatter:
             "analysisVersion": self.analysis_version,
             "modelInfo": {"name": model, "fallback": diagnosis.used_fallback},
             "rawSignal": raw_signal or {},
+            "category": category or "",
+            "primarySignal": primary_signal or "",
             "lastAnalyzedAt": _iso(datetime.now(timezone.utc)),
         }
 
@@ -107,6 +111,8 @@ class KubernetesDiagnosisReportWriter:
         diagnosis: DiagnosisResult,
         model: str,
         prefix: str,
+        category: str = "",
+        primary_signal: str = "",
     ) -> dict[str, Any]:
         name = self.formatter.dedupe_name(trigger, prefix)
         namespace = self.report_namespace
@@ -116,6 +122,8 @@ class KubernetesDiagnosisReportWriter:
                 diagnosis,
                 model,
                 raw_signal=trigger.raw_signal,
+                category=category,
+                primary_signal=primary_signal,
             )
         }
         try:

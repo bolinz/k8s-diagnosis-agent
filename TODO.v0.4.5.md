@@ -30,11 +30,11 @@ Goal: broaden diagnosis coverage with controlled scope and no architecture chang
   - [x] Tool registry wiring
   - [x] Unit tests for success/not-found/forbidden
 
-- [ ] Report/API/UI: add `category` and `primarySignal`
-  - [ ] Status/schema write path
-  - [ ] API list/detail response
-  - [ ] UI filter by category
-  - [ ] UI detail block for primary signal
+- [x] Report/API/UI: add `category` and `primarySignal`
+  - [x] Status/schema write path
+  - [x] API list/detail response
+  - [x] UI filter by category
+  - [x] UI detail block for primary signal
 
 - [ ] Observability: add minimal metrics
   - [ ] `diagnosis_requests_total`
