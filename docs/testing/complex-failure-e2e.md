@@ -20,7 +20,7 @@ Fault signals generated:
 ## Run
 
 ```bash
-cd /Users/zhangbolin/vibe-coding/k8s-diagnosis-agent
+cd k8s-diagnosis-agent
 chmod +x scripts/e2e/run_complex_failure.sh scripts/e2e/assert_complex_failure.py
 scripts/e2e/run_complex_failure.sh
 ```
@@ -29,6 +29,14 @@ Optional overrides:
 
 ```bash
 WORKLOAD_NS=diag-e2e REPORT_NS=k8s-diagnosis-system WAIT_SECONDS=300 scripts/e2e/run_complex_failure.sh
+```
+
+You can also tune assertion retry window for slower scan/model cycles:
+
+```bash
+WORKLOAD_NS=diag-e2e REPORT_NS=k8s-diagnosis-system WAIT_SECONDS=180 \
+ASSERT_WAIT_SECONDS=420 ASSERT_INTERVAL_SECONDS=30 \
+scripts/e2e/run_complex_failure.sh
 ```
 
 ## Pass Criteria
@@ -55,3 +63,23 @@ kubectl logs -n k8s-diagnosis-system deployment/k8s-diagnosis-agent --since=15m
 ```bash
 kubectl delete ns diag-e2e
 ```
+
+## Capability Proof (2026-03-27)
+
+Validated on cluster `<redacted-cluster>` with image:
+
+- `ghcr.io/bolinz/k8s-diagnosis-agent-app:sha-076127160ac72cffd95c94920214b1d87de1a086`
+
+Execution:
+
+```bash
+WORKLOAD_NS=diag-e2e REPORT_NS=k8s-diagnosis-system WAIT_SECONDS=180 \
+ASSERT_WAIT_SECONDS=420 ASSERT_INTERVAL_SECONDS=30 \
+scripts/e2e/run_complex_failure.sh
+```
+
+Observed result:
+
+- Assertion output: `{"ok": true, "reportName": "diagnosis-02212e9683", "symptom": "Pending", "relatedObjects": 8, "rootCauseCandidates": 4}`
+- Event stream included mixed real signals: `FailedScheduling`, `FailedMount`, and PVC `ProvisioningFailed`
+- Report quality checks passed (`summary/evidence/recommendations` non-empty, structured correlation fields present)
