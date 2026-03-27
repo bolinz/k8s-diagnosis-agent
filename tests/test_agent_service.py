@@ -655,6 +655,45 @@ def test_codex_agent_handles_function_call_then_structured_result():
     assert client.calls[0][0] == "get_recent_logs"
 
 
+def test_codex_agent_normalizes_string_fields_and_severity():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="ImagePullBackOff",
+        observed_for_seconds=1800,
+    )
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {
+                            "summary": "Image pull failed due to missing manifest.",
+                            "severity": "High",
+                            "probableCauses": "Image tag does not exist in registry.",
+                            "evidence": "failed to pull image: manifest unknown",
+                            "recommendations": "Verify image tag and digest.",
+                            "confidence": 0.8,
+                        }
+                    )
+                }
+            ]
+        ),
+        rule_engine=engine,
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
+    assert diagnosis.severity == "critical"
+    assert diagnosis.probable_causes == ["Image tag does not exist in registry."]
+    assert diagnosis.evidence == ["failed to pull image: manifest unknown"]
+    assert diagnosis.recommendations == ["Verify image tag and digest."]
+
+
 def test_codex_agent_falls_back_when_model_output_is_invalid():
     client = FakeKubernetesClient()
     trigger = TriggerContext(

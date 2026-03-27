@@ -28,6 +28,28 @@ If evidence is insufficient, say so explicitly in summary and lower confidence.
 Prefer the recommended tool sequence for the current symptom before using unrelated tools."""
 
 
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    return []
+
+
+def _normalize_severity(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"critical", "warning", "info"}:
+        return text
+    if text in {"high", "error"}:
+        return "critical"
+    if text in {"medium", "warn"}:
+        return "warning"
+    if text in {"low", "notice"}:
+        return "info"
+    return "warning"
+
+
 @dataclass
 class CodexDiagnosisAgent:
     responses_client: Any
@@ -232,14 +254,10 @@ class CodexDiagnosisAgent:
             return self.rule_engine.fallback_diagnosis(trigger)
         return DiagnosisResult(
             summary=str(payload.get("summary", "")).strip() or "Diagnosis incomplete",
-            severity=str(payload.get("severity", "warning")),
-            probable_causes=[
-                str(item) for item in payload.get("probableCauses", []) if str(item)
-            ],
-            evidence=[str(item) for item in payload.get("evidence", []) if str(item)],
-            recommendations=[
-                str(item) for item in payload.get("recommendations", []) if str(item)
-            ],
+            severity=_normalize_severity(payload.get("severity", "warning")),
+            probable_causes=_string_list(payload.get("probableCauses", [])),
+            evidence=_string_list(payload.get("evidence", [])),
+            recommendations=_string_list(payload.get("recommendations", [])),
             confidence=float(payload.get("confidence", 0.0)),
             related_objects=[
                 item for item in payload.get("relatedObjects", []) if isinstance(item, dict)
