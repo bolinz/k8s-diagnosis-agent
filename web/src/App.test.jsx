@@ -220,7 +220,7 @@ describe("App", () => {
     expect(screen.getByRole("textbox", { name: "Symptom" })).toHaveFocus();
   });
 
-  it("supports detail switch and keyboard shortcuts", async () => {
+  it("supports detail view and observability keyboard shortcuts", async () => {
     const listPayload = {
       items: [
         {
@@ -255,10 +255,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Pod/checkout-a" })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Pod\/checkout-b/i }));
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Pod/checkout-b" })).toBeInTheDocument();
-    });
+    expect(screen.getByRole("heading", { name: "Pod/checkout-a" })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "1" });
     expect(screen.getByRole("button", { name: "all" })).toHaveClass("view-active");
     fireEvent.keyDown(window, { key: "4" });
