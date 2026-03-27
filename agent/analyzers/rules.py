@@ -66,6 +66,8 @@ class RuleEngine:
             f"symptom={symptom}",
             f"observed_for_seconds={trigger.observed_for_seconds}",
         ]
+        raw_message = str(trigger.raw_signal.get("message", ""))
+        lower_message = raw_message.lower()
         probable_causes: list[str]
         recommendations: list[str]
         severity = "warning"
@@ -95,12 +97,27 @@ class RuleEngine:
                 "Inspect memory usage and increase limits or reduce memory spikes"
             ]
         elif symptom == "Pending":
-            probable_causes = [
-                "Scheduler constraints or insufficient cluster capacity prevent placement"
-            ]
-            recommendations = [
-                "Review Pod events for taints, affinity, quota, and resource shortage messages"
-            ]
+            if any(token in lower_message for token in {"insufficient", "didn't have enough", "insufficient cpu", "insufficient memory", "insufficient ephemeral-storage"}):
+                probable_causes = [
+                    "The scheduler could not place the pod because cluster resources are insufficient"
+                ]
+                recommendations = [
+                    "Check node allocatable capacity and current requests; lower pod requests or add capacity"
+                ]
+            elif any(token in lower_message for token in {"taint", "didn't tolerate", "affinity", "selector", "topology"}):
+                probable_causes = [
+                    "Scheduling constraints (taints, affinity, selectors, topology rules) prevent placement"
+                ]
+                recommendations = [
+                    "Review pod tolerations, affinity, node selectors, and topology constraints"
+                ]
+            else:
+                probable_causes = [
+                    "Scheduler constraints or insufficient cluster capacity prevent placement"
+                ]
+                recommendations = [
+                    "Review Pod events for taints, affinity, quota, and resource shortage messages"
+                ]
         elif symptom == "ProbeFailure":
             probable_causes = ["Health probes fail before the service is ready"]
             recommendations = [
@@ -124,12 +141,27 @@ class RuleEngine:
             ]
         elif symptom == "FailedMount":
             severity = "critical"
-            probable_causes = [
-                "A PVC, Secret, ConfigMap, or projected volume cannot be mounted into the pod"
-            ]
-            recommendations = [
-                "Inspect pod events, PVC binding state, and referenced volume sources"
-            ]
+            if any(token in lower_message for token in {"persistentvolumeclaim", "pvc", "not bound", "unbound"}):
+                probable_causes = [
+                    "A referenced PVC is not bound, so the pod cannot mount required storage"
+                ]
+                recommendations = [
+                    "Inspect PVC phase, storage class, and events; resolve pending/binding issues before retrying"
+                ]
+            elif any(token in lower_message for token in {"secret", "configmap", "not found", "couldn't find key"}):
+                probable_causes = [
+                    "A referenced Secret or ConfigMap for a volume mount is missing or invalid"
+                ]
+                recommendations = [
+                    "Verify volume source names and keys for Secrets/ConfigMaps in the pod spec"
+                ]
+            else:
+                probable_causes = [
+                    "A PVC, Secret, ConfigMap, or projected volume cannot be mounted into the pod"
+                ]
+                recommendations = [
+                    "Inspect pod events, PVC binding state, and referenced volume sources"
+                ]
         elif symptom == "FailedCreatePodSandbox":
             severity = "critical"
             probable_causes = [

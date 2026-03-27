@@ -656,6 +656,24 @@ def test_event_mapping_and_dedupe():
     assert failed_mount is not None
     assert failed_mount.symptom == "FailedMount"
 
+    failed_scheduling = map_event_to_trigger(
+        "prod",
+        {
+            "type": "Warning",
+            "reason": "FailedScheduling",
+            "message": "0/3 nodes are available: 3 Insufficient cpu.",
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "payments",
+                "name": "checkout-abc",
+            },
+            "lastTimestamp": "2026-03-22T05:00:01Z",
+        },
+    )
+    assert failed_scheduling is not None
+    assert failed_scheduling.symptom == "Pending"
+    assert "Insufficient cpu" in failed_scheduling.raw_signal["message"]
+
     cannot_run = map_event_to_trigger(
         "prod",
         {

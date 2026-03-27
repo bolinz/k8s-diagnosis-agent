@@ -100,3 +100,43 @@ def test_fallback_diagnosis_has_specific_mount_guidance():
     diagnosis = engine.fallback_diagnosis(trigger)
     assert diagnosis.severity == "critical"
     assert "PVC" in diagnosis.recommendations[0]
+
+
+def test_fallback_diagnosis_refines_pending_for_resource_shortage():
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    trigger = engine.findings_from_snapshot(
+        [
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Pod",
+                "symptom": "Pending",
+                "observed_for_seconds": 1000,
+                "reason": "FailedScheduling",
+                "message": "0/3 nodes are available: 3 Insufficient cpu.",
+            }
+        ]
+    )[0].trigger
+    diagnosis = engine.fallback_diagnosis(trigger)
+    assert "insufficient" in diagnosis.probable_causes[0].lower()
+    assert "capacity" in diagnosis.recommendations[0].lower()
+
+
+def test_fallback_diagnosis_refines_failed_mount_for_missing_secret():
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    trigger = engine.findings_from_snapshot(
+        [
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Pod",
+                "symptom": "FailedMount",
+                "observed_for_seconds": 1000,
+                "reason": "FailedMount",
+                "message": "MountVolume.SetUp failed for volume \"app-secret\": secret \"app-secret\" not found",
+            }
+        ]
+    )[0].trigger
+    diagnosis = engine.fallback_diagnosis(trigger)
+    assert "secret" in diagnosis.probable_causes[0].lower()
+    assert "configmap" in diagnosis.recommendations[0].lower() or "secret" in diagnosis.recommendations[0].lower()
