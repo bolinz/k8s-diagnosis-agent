@@ -342,6 +342,7 @@ class AgentService:
             "lastAnalyzedAt": status.get("lastAnalyzedAt", ""),
             "analysisVersion": status.get("analysisVersion", ""),
             "modelInfo": status.get("modelInfo", {}),
+            "diagnosisTrace": status.get("diagnosisTrace", {}),
             "rawSignal": self._raw_signal_summary(status.get("rawSignal", {})),
             "category": self._normalize_category(
                 status.get("category", ""),
@@ -420,8 +421,12 @@ class AgentService:
             "name": model_info.get("name") or self._active_model_name(),
             "fallback": bool(model_info.get("fallback", False)),
         }
+        if model_info.get("traceId"):
+            normalized["modelInfo"]["traceId"] = str(model_info.get("traceId"))
         raw_signal = normalized.get("rawSignal")
         normalized["rawSignal"] = raw_signal if isinstance(raw_signal, dict) else {}
+        trace = normalized.get("diagnosisTrace")
+        normalized["diagnosisTrace"] = trace if isinstance(trace, dict) else {}
         normalized["relatedObjects"] = [
             item
             for item in normalized.get("relatedObjects", [])

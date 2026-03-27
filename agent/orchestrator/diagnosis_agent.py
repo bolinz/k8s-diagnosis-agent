@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from agent.analyzers.rules import RuleEngine
 from agent.metrics import inc_counter
@@ -66,6 +67,8 @@ class DiagnosisAgent:
         trigger: TriggerContext,
         tool_registry: ToolRegistry,
     ) -> DiagnosisResult:
+        trace = self._new_trace(trigger)
+        trace_id = trace["traceId"]
         if (
             getattr(self.responses_client, "provider_name", "openai") == "openai"
             and not getattr(self.responses_client, "api_key", None)
@@ -81,8 +84,13 @@ class DiagnosisAgent:
                 workload_kind=trigger.workload.kind,
                 workload_name=trigger.workload.name,
                 symptom=trigger.symptom,
+                trace_id=trace_id,
             )
-            return self.rule_engine.fallback_diagnosis(trigger)
+            return self._fallback_with_trace(
+                trigger=trigger,
+                trace=trace,
+                reason="missing_credentials",
+            )
 
         messages: list[dict[str, Any]] = [
             {
@@ -99,20 +107,18 @@ class DiagnosisAgent:
         tool_calls = 0
         while True:
             if perf_counter() - started_at >= self.max_diagnosis_seconds:
-                log_event(
-                    LOGGER,
-                    logging.WARNING,
-                    "fallback_selected",
-                    "using fallback diagnosis because diagnosis time budget was exceeded",
+                return self._fallback_with_trace(
+                    trigger=trigger,
+                    trace=trace,
+                    reason="diagnosis_time_budget_exceeded",
                     provider=getattr(self.responses_client, "provider_name", ""),
                     model=self.model,
                     max_diagnosis_seconds=self.max_diagnosis_seconds,
                 )
-                return self.rule_engine.fallback_diagnosis(trigger)
             log_event(
                 LOGGER,
                 logging.INFO,
-                "diagnosis_request",
+                "model_request_start",
                 "requesting diagnosis response",
                 provider=getattr(self.responses_client, "provider_name", ""),
                 model=self.model,
@@ -120,7 +126,9 @@ class DiagnosisAgent:
                 workload_kind=trigger.workload.kind,
                 workload_name=trigger.workload.name,
                 symptom=trigger.symptom,
+                trace_id=trace_id,
             )
+            model_started = perf_counter()
             try:
                 response = self.responses_client.create_response(
                     {
@@ -131,22 +139,34 @@ class DiagnosisAgent:
                     }
                 )
             except Exception as exc:
-                log_event(
-                    LOGGER,
-                    logging.WARNING,
-                    "fallback_selected",
-                    "using fallback diagnosis because model request failed",
+                return self._fallback_with_trace(
+                    trigger=trigger,
+                    trace=trace,
+                    reason="model_request_failed",
                     provider=getattr(self.responses_client, "provider_name", ""),
                     model=self.model,
                     error=str(exc),
+                    trace_id=trace_id,
                 )
-                return self.rule_engine.fallback_diagnosis(trigger)
+            elapsed_ms = int((perf_counter() - model_started) * 1000)
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "model_request_end",
+                "diagnosis response received",
+                provider=getattr(self.responses_client, "provider_name", ""),
+                model=self.model,
+                duration_ms=elapsed_ms,
+                trace_id=trace_id,
+            )
             output = response.get("output", [])
             function_calls = [
                 item for item in output if item.get("type") == "function_call"
             ]
             if not function_calls:
-                return self._parse_final_response(response, trigger)
+                trace["toolCallsUsed"] = tool_calls
+                trace["durationMs"] = int((perf_counter() - started_at) * 1000)
+                return self._parse_final_response(response, trigger, trace)
             messages.append(
                 {
                     "type": "assistant_tool_calls",
@@ -155,27 +175,25 @@ class DiagnosisAgent:
             )
             for call in function_calls:
                 if perf_counter() - started_at >= self.max_diagnosis_seconds:
-                    log_event(
-                        LOGGER,
-                        logging.WARNING,
-                        "fallback_selected",
-                        "using fallback diagnosis because diagnosis time budget was exceeded",
+                    return self._fallback_with_trace(
+                        trigger=trigger,
+                        trace=trace,
+                        reason="diagnosis_time_budget_exceeded",
                         provider=getattr(self.responses_client, "provider_name", ""),
                         model=self.model,
                         max_diagnosis_seconds=self.max_diagnosis_seconds,
+                        trace_id=trace_id,
                     )
-                    return self.rule_engine.fallback_diagnosis(trigger)
                 if tool_calls >= self.max_tool_calls:
-                    log_event(
-                        LOGGER,
-                        logging.WARNING,
-                        "fallback_selected",
-                        "using fallback diagnosis because tool call budget was exceeded",
+                    return self._fallback_with_trace(
+                        trigger=trigger,
+                        trace=trace,
+                        reason="tool_call_budget_exceeded",
                         provider=getattr(self.responses_client, "provider_name", ""),
                         model=self.model,
                         tool_calls=tool_calls,
+                        trace_id=trace_id,
                     )
-                    return self.rule_engine.fallback_diagnosis(trigger)
                 tool_calls += 1
                 inc_counter("tool_calls_total")
                 arguments = json.loads(call.get("arguments") or "{}")
@@ -186,8 +204,18 @@ class DiagnosisAgent:
                     "executing read-only tool",
                     tool_name=call["name"],
                     arguments=arguments,
+                    trace_id=trace_id,
                 )
+                tool_started = perf_counter()
                 tool_output = tool_registry.execute(call["name"], arguments)
+                tool_elapsed_ms = int((perf_counter() - tool_started) * 1000)
+                scope_guard_hit = self._is_scope_guard_error(tool_output)
+                self._record_tool_trace(
+                    trace=trace,
+                    tool_name=call["name"],
+                    duration_ms=tool_elapsed_ms,
+                    scope_guard_hit=scope_guard_hit,
+                )
                 self.tool_history.append(
                     ToolCallRecord(
                         name=call["name"],
@@ -208,7 +236,10 @@ class DiagnosisAgent:
                     "tool_call_end",
                     "tool execution completed",
                     tool_name=call["name"],
+                    duration_ms=tool_elapsed_ms,
+                    scope_guard_hit=scope_guard_hit,
                     output=truncate_text(tool_output, 400),
+                    trace_id=trace_id,
                 )
 
     def _build_user_prompt(self, trigger: TriggerContext) -> str:
@@ -262,22 +293,21 @@ class DiagnosisAgent:
         self,
         response: dict[str, Any],
         trigger: TriggerContext,
+        trace: dict[str, Any],
     ) -> DiagnosisResult:
         text = self._extract_output_text(response)
         try:
             payload = json.loads(text)
         except json.JSONDecodeError:
-            log_event(
-                LOGGER,
-                logging.WARNING,
-                "fallback_selected",
-                "using fallback diagnosis because model response was not valid json",
+            return self._fallback_with_trace(
+                trigger=trigger,
+                trace=trace,
+                reason="invalid_model_json",
                 provider=getattr(self.responses_client, "provider_name", ""),
                 model=self.model,
                 response_text=truncate_text(text, 400),
             )
-            return self.rule_engine.fallback_diagnosis(trigger)
-        return DiagnosisResult(
+        result = DiagnosisResult(
             summary=str(payload.get("summary", "")).strip() or "Diagnosis incomplete",
             severity=_normalize_severity(payload.get("severity", "warning")),
             probable_causes=_string_list(payload.get("probableCauses", [])),
@@ -298,6 +328,8 @@ class DiagnosisAgent:
             else {},
             raw_agent_output={"response": response, "text": text},
         )
+        self._attach_trace(result, trace, fallback_reason="")
+        return result
 
     def _extract_output_text(self, response: dict[str, Any]) -> str:
         if isinstance(response.get("output_text"), str):
@@ -311,6 +343,84 @@ class DiagnosisAgent:
                 if text:
                     chunks.append(text)
         return "\n".join(chunks)
+
+    def _new_trace(self, trigger: TriggerContext) -> dict[str, Any]:
+        return {
+            "traceId": uuid4().hex[:12],
+            "source": trigger.source,
+            "toolSequence": [],
+            "toolCallsUsed": 0,
+            "maxToolCalls": self.max_tool_calls,
+            "maxDiagnosisSeconds": self.max_diagnosis_seconds,
+            "scopeGuardHits": 0,
+            "fallbackReason": "",
+            "durationMs": 0,
+        }
+
+    def _record_tool_trace(
+        self,
+        trace: dict[str, Any],
+        tool_name: str,
+        duration_ms: int,
+        scope_guard_hit: bool,
+    ) -> None:
+        trace["toolSequence"].append(
+            {
+                "name": tool_name,
+                "durationMs": duration_ms,
+                "scopeGuardHit": scope_guard_hit,
+            }
+        )
+        trace["toolCallsUsed"] = int(trace.get("toolCallsUsed", 0)) + 1
+        if scope_guard_hit:
+            trace["scopeGuardHits"] = int(trace.get("scopeGuardHits", 0)) + 1
+
+    def _is_scope_guard_error(self, tool_output: str) -> bool:
+        try:
+            payload = json.loads(tool_output)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        return payload.get("error") == "tool_guard"
+
+    def _fallback_with_trace(
+        self,
+        trigger: TriggerContext,
+        trace: dict[str, Any],
+        reason: str,
+        **payload: Any,
+    ) -> DiagnosisResult:
+        trace["fallbackReason"] = reason
+        event_payload = {
+            "provider": getattr(self.responses_client, "provider_name", ""),
+            "model": self.model,
+            "trace_id": trace.get("traceId", ""),
+            "fallback_reason": reason,
+        }
+        event_payload.update(payload)
+        log_event(
+            LOGGER,
+            logging.WARNING,
+            "fallback_selected",
+            "using fallback diagnosis",
+            **event_payload,
+        )
+        result = self.rule_engine.fallback_diagnosis(trigger)
+        self._attach_trace(result, trace, fallback_reason=reason)
+        return result
+
+    def _attach_trace(
+        self,
+        diagnosis: DiagnosisResult,
+        trace: dict[str, Any],
+        fallback_reason: str,
+    ) -> None:
+        trace_payload = dict(trace)
+        if fallback_reason:
+            trace_payload["fallbackReason"] = fallback_reason
+        diagnosis.raw_agent_output = dict(diagnosis.raw_agent_output)
+        diagnosis.raw_agent_output["trace"] = trace_payload
 
 
 # Backward-compatible alias for existing imports.

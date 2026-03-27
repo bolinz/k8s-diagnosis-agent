@@ -63,7 +63,15 @@ class DiagnosisReportFormatter:
         category: str | None = None,
         primary_signal: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        trace = {}
+        if isinstance(diagnosis.raw_agent_output, dict):
+            candidate = diagnosis.raw_agent_output.get("trace")
+            if isinstance(candidate, dict):
+                trace = candidate
+        model_info = {"name": model, "fallback": diagnosis.used_fallback}
+        if trace.get("traceId"):
+            model_info["traceId"] = trace["traceId"]
+        status = {
             "phase": "Analyzed",
             "severity": diagnosis.severity,
             "summary": diagnosis.summary,
@@ -76,12 +84,15 @@ class DiagnosisReportFormatter:
             "evidenceTimeline": diagnosis.evidence_timeline,
             "impactSummary": diagnosis.impact_summary,
             "analysisVersion": self.analysis_version,
-            "modelInfo": {"name": model, "fallback": diagnosis.used_fallback},
+            "modelInfo": model_info,
             "rawSignal": raw_signal or {},
             "category": category or "",
             "primarySignal": primary_signal or "",
             "lastAnalyzedAt": _iso(datetime.now(timezone.utc)),
         }
+        if trace:
+            status["diagnosisTrace"] = trace
+        return status
 
     def dedupe_name(self, trigger: TriggerContext, prefix: str) -> str:
         digest = sha1(

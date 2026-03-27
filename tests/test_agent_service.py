@@ -296,7 +296,13 @@ class FakeKubernetesClient:
                         "relatedReportCount": 0,
                     },
                     "analysisVersion": "0.3.0",
-                    "modelInfo": {"name": "gpt-5-codex", "fallback": False},
+                    "modelInfo": {"name": "gpt-5-codex", "fallback": False, "traceId": "trace-a"},
+                    "diagnosisTrace": {
+                        "traceId": "trace-a",
+                        "toolCallsUsed": 2,
+                        "scopeGuardHits": 0,
+                        "fallbackReason": "",
+                    },
                     "rawSignal": {
                         "reason": "BackOff",
                         "message": "restart",
@@ -746,6 +752,8 @@ def test_codex_agent_handles_function_call_then_structured_result():
     assert diagnosis.summary.startswith("Checkout pod crashes")
     assert diagnosis.confidence == 0.93
     assert client.calls[0][0] == "get_recent_logs"
+    assert diagnosis.raw_agent_output.get("trace", {}).get("toolCallsUsed", 0) >= 1
+    assert diagnosis.raw_agent_output.get("trace", {}).get("traceId")
 
 
 def test_codex_agent_normalizes_string_fields_and_severity():
@@ -807,6 +815,7 @@ def test_codex_agent_falls_back_when_model_output_is_invalid():
     diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
     assert diagnosis.used_fallback is True
     assert diagnosis.severity == "critical"
+    assert diagnosis.raw_agent_output.get("trace", {}).get("fallbackReason") == "invalid_model_json"
 
 
 def test_codex_agent_falls_back_when_diagnosis_time_budget_exceeded():
@@ -932,6 +941,22 @@ def test_formatter_dedupes_report_name_and_targets_report_namespace_shape():
     assert status["primarySignal"] == "BackOff"
 
 
+def test_formatter_writes_trace_into_status_model_info():
+    formatter = DiagnosisReportFormatter()
+    diagnosis = engine_result()
+    diagnosis.raw_agent_output = {
+        "trace": {
+            "traceId": "trace-123",
+            "toolCallsUsed": 2,
+            "scopeGuardHits": 1,
+            "fallbackReason": "",
+        }
+    }
+    status = formatter.build_status(diagnosis, "gpt-5-codex")
+    assert status["modelInfo"]["traceId"] == "trace-123"
+    assert status["diagnosisTrace"]["toolCallsUsed"] == 2
+
+
 def test_service_lists_and_reads_reports():
     client = FakeKubernetesClient()
     settings = build_settings()
@@ -954,6 +979,8 @@ def test_service_lists_and_reads_reports():
     assert report["cluster"] == "prod"
     assert report["triggerAt"]
     assert report["analysisVersion"] == "0.3.0"
+    assert report["modelInfo"]["traceId"] == "trace-a"
+    assert report["diagnosisTrace"]["traceId"] == "trace-a"
     assert report["rawSignal"]["podPhase"] == "Running"
     assert report["relatedObjects"][0]["role"] == "primary"
     assert report["rootCauseCandidates"][0]["objectRef"]["kind"] == "Deployment"
