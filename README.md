@@ -2,8 +2,7 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Latest stable release: `v0.4.8`  
-Next planned release: `v0.5.0`
+Latest stable release: `v0.5.1`
 
 ## Features
 
@@ -178,10 +177,9 @@ Latest validated run (2026-03-27) passed on cluster `<redacted-cluster>`, produc
 
 ## Release and Versioning
 
-- Latest stable release: `v0.4.8`
-- Next planned release: `v0.5.0`
-- Python package version (branch target): `0.5.0`
-- Helm chart version (branch target): `0.5.0`
+- Latest stable release: `v0.5.1`
+- Python package version: `0.5.1`
+- Helm chart version: `0.5.1`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
 
 The current CI/release workflows:
@@ -191,14 +189,20 @@ The current CI/release workflows:
 - uses shell `docker` commands for image build and push
 - auto-creates GitHub Releases on `v*` tag pushes
 
-`v0.5.0` (planned) is a major UI/operability release that includes:
+`v0.5.1` is a patch release focused on deployment consistency:
+
+- runtime image now bundles built Workbench frontend assets
+- frontend static files are packaged with `agent.ui` during wheel install
+- `.dockerignore` excludes local frontend build output to avoid stale assets
+
+`v0.5.0` introduced the major UI/operability updates including:
 
 - timeline density strip + focused event navigation
 - grouped event navigator with sorting/collapse and keyboard shortcuts
 - shortcut help panel and persisted timeline group sort preferences
 - stronger frontend CI gating (`vitest + playwright e2e`)
 
-`v0.4.8` is the latest reliability patch release for webhook execution flow:
+`v0.4.8` introduced the reliability patch for webhook execution flow:
 
 - `POST /alert` now returns immediately with `202` and `requestId`, and diagnosis runs asynchronously
 - new `GET /api/alerts/{requestId}` endpoint to inspect alert task status/result

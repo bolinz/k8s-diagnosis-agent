@@ -84,7 +84,7 @@
           "signal": "ProvisioningFailed"
         }
       ],
-      "analysisVersion": "0.5.0"
+      "analysisVersion": "0.5.1"
     },
     {
       "name": "preview-2",
@@ -157,7 +157,7 @@
           "signal": "ProgressDeadlineExceeded"
         }
       ],
-      "analysisVersion": "0.5.0"
+      "analysisVersion": "0.5.1"
     },
     {
       "name": "preview-3",
@@ -231,7 +231,7 @@
           "signal": "ImagePullBackOff"
         }
       ],
-      "analysisVersion": "0.5.0"
+      "analysisVersion": "0.5.1"
     },
     {
       "name": "preview-4",
@@ -390,7 +390,7 @@
           }
         }
       ],
-      "analysisVersion": "0.5.0"
+      "analysisVersion": "0.5.1"
     },
     {
       "name": "preview-5",
@@ -541,7 +541,7 @@
           }
         }
       ],
-      "analysisVersion": "0.5.0"
+      "analysisVersion": "0.5.1"
     }
   ]
 }
