@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.5.0 (Unreleased)
+
+Release type: UI/operability enhancement patch for the embedded workbench.
+
+### Added
+
+- Timeline density strip and focused event navigation controls.
+- Timeline keyboard hotkeys: `,` (previous) and `.` (next) focused event.
+- Event navigator grouping improvements:
+  - grouped by signal
+  - group sort modes (`By Count` / `By Time`)
+  - per-group collapse/expand and active-group highlight
+- Shortcut help panel (`Shortcuts` button, `?` hotkey).
+- Additional Playwright e2e coverage for timeline grouping/navigation/persistence paths.
+
+### Changed
+
+- Timeline group sort preference is persisted in UI local storage preferences.
+
 ## v0.4.8
 
 Release type: reliability patch for HTTP alert handling and runtime logging noise reduction.

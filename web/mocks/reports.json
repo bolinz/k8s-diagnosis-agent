@@ -1,0 +1,547 @@
+{
+  "items": [
+    {
+      "name": "preview-1",
+      "namespace": "diag-e2e",
+      "severity": "critical",
+      "symptom": "FailedMount",
+      "summary": "PVC pending blocks scheduling and affects rollout availability.",
+      "lastAnalyzedAt": "2026-03-28T02:23:45+00:00",
+      "triggerAt": "2026-03-28T02:20:00+00:00",
+      "source": "event",
+      "workload": {
+        "kind": "Pod",
+        "name": "checkout-abc"
+      },
+      "recommendations": [
+        "Check PVC binding",
+        "Validate StorageClass",
+        "Inspect FailedMount events"
+      ],
+      "probableCauses": [
+        "PVC unbound",
+        "StorageClass mismatch"
+      ],
+      "evidence": [
+        "FailedScheduling with unbound PVC",
+        "ProvisioningFailed on PVC"
+      ],
+      "rawSignal": {
+        "reason": "FailedMount",
+        "message": "Unable to attach or mount volumes",
+        "podPhase": "Pending",
+        "containerReason": "ContainerCreating",
+        "pvcPhase": "Pending"
+      },
+      "relatedObjects": [
+        {
+          "kind": "Pod",
+          "namespace": "diag-e2e",
+          "name": "checkout-abc",
+          "role": "primary"
+        },
+        {
+          "kind": "Deployment",
+          "namespace": "diag-e2e",
+          "name": "checkout",
+          "role": "owner"
+        },
+        {
+          "kind": "PersistentVolumeClaim",
+          "namespace": "diag-e2e",
+          "name": "checkout-pvc",
+          "role": "upstream-suspect"
+        },
+        {
+          "kind": "Pod",
+          "namespace": "diag-e2e",
+          "name": "checkout-def",
+          "role": "affected"
+        }
+      ],
+      "rootCauseCandidates": [
+        {
+          "objectRef": {
+            "kind": "PersistentVolumeClaim",
+            "namespace": "diag-e2e",
+            "name": "checkout-pvc"
+          },
+          "reason": "PVC pending blocks mount",
+          "confidence": 0.89
+        }
+      ],
+      "evidenceTimeline": [
+        {
+          "time": "2026-03-28T02:20:11+00:00",
+          "signal": "FailedScheduling"
+        },
+        {
+          "time": "2026-03-28T02:21:10+00:00",
+          "signal": "FailedMount"
+        },
+        {
+          "time": "2026-03-28T02:21:30+00:00",
+          "signal": "ProvisioningFailed"
+        }
+      ],
+      "analysisVersion": "0.5.0"
+    },
+    {
+      "name": "preview-2",
+      "namespace": "payments",
+      "severity": "warning",
+      "symptom": "ProgressDeadlineExceeded",
+      "summary": "Deployment rollout is stuck and new replicas are not becoming available.",
+      "lastAnalyzedAt": "2026-03-28T02:30:15+00:00",
+      "triggerAt": "2026-03-28T02:26:00+00:00",
+      "source": "scheduled",
+      "workload": {
+        "kind": "Deployment",
+        "name": "billing-api"
+      },
+      "recommendations": [
+        "Inspect rollout events",
+        "Check probe readiness thresholds",
+        "Validate image startup command"
+      ],
+      "probableCauses": [
+        "Readiness probe failures",
+        "Container startup latency"
+      ],
+      "evidence": [
+        "Deployment condition ProgressDeadlineExceeded",
+        "Unavailable replicas remained > 0 for 15m"
+      ],
+      "rawSignal": {
+        "deploymentCondition": "ProgressDeadlineExceeded",
+        "containerReason": "CrashLoopBackOff"
+      },
+      "relatedObjects": [
+        {
+          "kind": "Deployment",
+          "namespace": "payments",
+          "name": "billing-api",
+          "role": "primary"
+        },
+        {
+          "kind": "ReplicaSet",
+          "namespace": "payments",
+          "name": "billing-api-6bbf7b7b8f",
+          "role": "owner"
+        },
+        {
+          "kind": "Pod",
+          "namespace": "payments",
+          "name": "billing-api-6bbf7b7b8f-2k8mb",
+          "role": "affected"
+        }
+      ],
+      "rootCauseCandidates": [
+        {
+          "objectRef": {
+            "kind": "Pod",
+            "namespace": "payments",
+            "name": "billing-api-6bbf7b7b8f-2k8mb"
+          },
+          "reason": "Readiness checks fail during startup burst",
+          "confidence": 0.74
+        }
+      ],
+      "evidenceTimeline": [
+        {
+          "time": "2026-03-28T02:26:33+00:00",
+          "signal": "ReplicaMismatch"
+        },
+        {
+          "time": "2026-03-28T02:28:20+00:00",
+          "signal": "ProgressDeadlineExceeded"
+        }
+      ],
+      "analysisVersion": "0.5.0"
+    },
+    {
+      "name": "preview-3",
+      "namespace": "checkout",
+      "severity": "critical",
+      "symptom": "ImagePullBackOff",
+      "summary": "Multiple pods are failing to pull image from registry after tag update.",
+      "lastAnalyzedAt": "2026-03-28T02:36:00+00:00",
+      "triggerAt": "2026-03-28T02:34:25+00:00",
+      "source": "event",
+      "workload": {
+        "kind": "Pod",
+        "name": "checkout-web-5dfb7d6f8b-k9v6p"
+      },
+      "recommendations": [
+        "Verify image tag exists in registry",
+        "Check imagePullSecrets and registry auth",
+        "Rollback to last known good image"
+      ],
+      "probableCauses": [
+        "Image tag not found",
+        "Registry credential expired"
+      ],
+      "evidence": [
+        "ErrImagePull reported for 3 replicas",
+        "ImagePullBackOff persisted for 90s"
+      ],
+      "rawSignal": {
+        "reason": "ErrImagePull",
+        "message": "pull access denied for ghcr.io/org/checkout-web:v20260328-2",
+        "containerReason": "ImagePullBackOff"
+      },
+      "relatedObjects": [
+        {
+          "kind": "Pod",
+          "namespace": "checkout",
+          "name": "checkout-web-5dfb7d6f8b-k9v6p",
+          "role": "primary"
+        },
+        {
+          "kind": "Deployment",
+          "namespace": "checkout",
+          "name": "checkout-web",
+          "role": "owner"
+        },
+        {
+          "kind": "Pod",
+          "namespace": "checkout",
+          "name": "checkout-web-5dfb7d6f8b-z9s4x",
+          "role": "affected"
+        }
+      ],
+      "rootCauseCandidates": [
+        {
+          "objectRef": {
+            "kind": "Deployment",
+            "namespace": "checkout",
+            "name": "checkout-web"
+          },
+          "reason": "Image tag propagated to all replicas and pull failed",
+          "confidence": 0.92
+        }
+      ],
+      "evidenceTimeline": [
+        {
+          "time": "2026-03-28T02:34:40+00:00",
+          "signal": "ErrImagePull"
+        },
+        {
+          "time": "2026-03-28T02:35:20+00:00",
+          "signal": "ImagePullBackOff"
+        }
+      ],
+      "analysisVersion": "0.5.0"
+    },
+    {
+      "name": "preview-4",
+      "namespace": "timeline-lab",
+      "severity": "warning",
+      "symptom": "ReplicaMismatch",
+      "summary": "Synthetic timeline-stretch sample for validating horizontal scaling and time-window filtering.",
+      "lastAnalyzedAt": "2026-03-28T04:00:00+00:00",
+      "triggerAt": "2026-03-27T20:00:00+00:00",
+      "source": "scheduled",
+      "workload": {
+        "kind": "Deployment",
+        "name": "timeline-stretch-demo"
+      },
+      "recommendations": [
+        "Use this report to validate timeline zoom behavior",
+        "Switch Window between all/6h/1h/15m/5m and inspect point distribution",
+        "Click points to verify timeline inspector and focus state"
+      ],
+      "probableCauses": [
+        "Synthetic dataset for UI timeline validation only"
+      ],
+      "evidence": [
+        "Contains long-span and dense-burst signals in one report"
+      ],
+      "rawSignal": {
+        "deploymentCondition": "ReplicaMismatch",
+        "message": "timeline stretch dataset"
+      },
+      "relatedObjects": [
+        {
+          "kind": "Deployment",
+          "namespace": "timeline-lab",
+          "name": "timeline-stretch-demo",
+          "role": "primary"
+        },
+        {
+          "kind": "ReplicaSet",
+          "namespace": "timeline-lab",
+          "name": "timeline-stretch-demo-78c76f59dd",
+          "role": "owner"
+        },
+        {
+          "kind": "Pod",
+          "namespace": "timeline-lab",
+          "name": "timeline-stretch-demo-78c76f59dd-a1",
+          "role": "affected"
+        },
+        {
+          "kind": "Pod",
+          "namespace": "timeline-lab",
+          "name": "timeline-stretch-demo-78c76f59dd-a2",
+          "role": "affected"
+        }
+      ],
+      "rootCauseCandidates": [
+        {
+          "objectRef": {
+            "kind": "Deployment",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo"
+          },
+          "reason": "Synthetic candidate for timeline inspection",
+          "confidence": 0.55
+        }
+      ],
+      "evidenceTimeline": [
+        {
+          "time": "2026-03-27T20:01:00+00:00",
+          "signal": "ReplicaMismatch",
+          "objectRef": {
+            "kind": "Deployment",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo"
+          }
+        },
+        {
+          "time": "2026-03-27T22:40:00+00:00",
+          "signal": "RolloutSlow",
+          "objectRef": {
+            "kind": "ReplicaSet",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo-78c76f59dd"
+          }
+        },
+        {
+          "time": "2026-03-28T00:15:00+00:00",
+          "signal": "PodPendingBurst",
+          "objectRef": {
+            "kind": "Pod",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo-78c76f59dd-a1"
+          }
+        },
+        {
+          "time": "2026-03-28T03:45:00+00:00",
+          "signal": "FailedScheduling",
+          "objectRef": {
+            "kind": "Pod",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo-78c76f59dd-a1"
+          }
+        },
+        {
+          "time": "2026-03-28T03:52:10+00:00",
+          "signal": "ContainerCreating",
+          "objectRef": {
+            "kind": "Pod",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo-78c76f59dd-a1"
+          }
+        },
+        {
+          "time": "2026-03-28T03:52:35+00:00",
+          "signal": "ContainerCreating",
+          "objectRef": {
+            "kind": "Pod",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo-78c76f59dd-a2"
+          }
+        },
+        {
+          "time": "2026-03-28T03:53:00+00:00",
+          "signal": "ReadinessProbeFailed",
+          "objectRef": {
+            "kind": "Pod",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo-78c76f59dd-a1"
+          }
+        },
+        {
+          "time": "2026-03-28T03:53:20+00:00",
+          "signal": "ReadinessProbeFailed",
+          "objectRef": {
+            "kind": "Pod",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo-78c76f59dd-a2"
+          }
+        },
+        {
+          "time": "2026-03-28T03:55:10+00:00",
+          "signal": "ProgressDeadlineNear",
+          "objectRef": {
+            "kind": "Deployment",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo"
+          }
+        },
+        {
+          "time": "2026-03-28T03:58:30+00:00",
+          "signal": "ProgressDeadlineExceeded",
+          "objectRef": {
+            "kind": "Deployment",
+            "namespace": "timeline-lab",
+            "name": "timeline-stretch-demo"
+          }
+        }
+      ],
+      "analysisVersion": "0.5.0"
+    },
+    {
+      "name": "preview-5",
+      "namespace": "graph-lab",
+      "severity": "critical",
+      "symptom": "ProgressDeadlineExceeded",
+      "summary": "High-fanout graph sample for validating non-overlap in relation rendering.",
+      "lastAnalyzedAt": "2026-03-28T06:10:00+00:00",
+      "triggerAt": "2026-03-28T05:55:00+00:00",
+      "source": "event",
+      "workload": {
+        "kind": "Deployment",
+        "name": "graph-stress-demo"
+      },
+      "recommendations": [
+        "Use this report to verify relation graph readability under high object count",
+        "Click different nodes and confirm locked name pills stay readable",
+        "Switch between reports and ensure no line-node overlap remains"
+      ],
+      "probableCauses": [
+        "Synthetic graph stress scenario for UI validation"
+      ],
+      "evidence": [
+        "Contains owner, affected and upstream objects to maximize edge density"
+      ],
+      "rawSignal": {
+        "reason": "ProgressDeadlineExceeded",
+        "message": "graph stress synthetic sample",
+        "deploymentCondition": "ProgressDeadlineExceeded"
+      },
+      "relatedObjects": [
+        {
+          "kind": "Deployment",
+          "namespace": "graph-lab",
+          "name": "graph-stress-demo",
+          "role": "primary"
+        },
+        {
+          "kind": "ReplicaSet",
+          "namespace": "graph-lab",
+          "name": "graph-stress-demo-5f66c7d679",
+          "role": "owner"
+        },
+        {
+          "kind": "Pod",
+          "namespace": "graph-lab",
+          "name": "graph-stress-demo-5f66c7d679-a1",
+          "role": "affected"
+        },
+        {
+          "kind": "Pod",
+          "namespace": "graph-lab",
+          "name": "graph-stress-demo-5f66c7d679-a2",
+          "role": "affected"
+        },
+        {
+          "kind": "Pod",
+          "namespace": "graph-lab",
+          "name": "graph-stress-demo-5f66c7d679-a3",
+          "role": "affected"
+        },
+        {
+          "kind": "Pod",
+          "namespace": "graph-lab",
+          "name": "graph-stress-demo-5f66c7d679-a4",
+          "role": "affected"
+        },
+        {
+          "kind": "Service",
+          "namespace": "graph-lab",
+          "name": "graph-stress-demo",
+          "role": "upstream-suspect"
+        },
+        {
+          "kind": "ConfigMap",
+          "namespace": "graph-lab",
+          "name": "graph-stress-config",
+          "role": "upstream-suspect"
+        },
+        {
+          "kind": "Secret",
+          "namespace": "graph-lab",
+          "name": "graph-stress-secret",
+          "role": "upstream-suspect"
+        },
+        {
+          "kind": "PersistentVolumeClaim",
+          "namespace": "graph-lab",
+          "name": "graph-stress-cache",
+          "role": "upstream-suspect"
+        },
+        {
+          "kind": "Node",
+          "namespace": "",
+          "name": "worker-a",
+          "role": "upstream-suspect"
+        },
+        {
+          "kind": "Node",
+          "namespace": "",
+          "name": "worker-b",
+          "role": "upstream-suspect"
+        },
+        {
+          "kind": "HorizontalPodAutoscaler",
+          "namespace": "graph-lab",
+          "name": "graph-stress-demo",
+          "role": "owner"
+        }
+      ],
+      "rootCauseCandidates": [
+        {
+          "objectRef": {
+            "kind": "Deployment",
+            "namespace": "graph-lab",
+            "name": "graph-stress-demo"
+          },
+          "reason": "Rollout stalled under synthetic high-fanout dependency changes",
+          "confidence": 0.67
+        }
+      ],
+      "evidenceTimeline": [
+        {
+          "time": "2026-03-28T05:56:00+00:00",
+          "signal": "ReplicaMismatch",
+          "objectRef": {
+            "kind": "Deployment",
+            "namespace": "graph-lab",
+            "name": "graph-stress-demo"
+          }
+        },
+        {
+          "time": "2026-03-28T06:01:10+00:00",
+          "signal": "ReadinessProbeFailed",
+          "objectRef": {
+            "kind": "Pod",
+            "namespace": "graph-lab",
+            "name": "graph-stress-demo-5f66c7d679-a3"
+          }
+        },
+        {
+          "time": "2026-03-28T06:06:40+00:00",
+          "signal": "ProgressDeadlineExceeded",
+          "objectRef": {
+            "kind": "Deployment",
+            "namespace": "graph-lab",
+            "name": "graph-stress-demo"
+          }
+        }
+      ],
+      "analysisVersion": "0.5.0"
+    }
+  ]
+}

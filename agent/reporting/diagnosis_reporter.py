@@ -26,7 +26,7 @@ LOGGER = get_logger("report_writer")
 
 @dataclass
 class DiagnosisReportFormatter:
-    analysis_version: str = "0.4.8"
+    analysis_version: str = "0.5.0"
 
     def build_spec(
         self,

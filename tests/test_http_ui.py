@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from agent.analyzers.rules import RuleEngine
 from agent.orchestrator.codex_agent import CodexDiagnosisAgent
 from agent.service import AgentService
@@ -9,23 +11,15 @@ from tests.test_agent_service import FakeKubernetesClient, FakeResponsesClient, 
 
 
 def test_ui_template_contains_expected_sections():
-    assert "K8s Diagnosis" in INDEX_HTML
-    assert "/api/reports" in INDEX_HTML
-    assert "Probable Causes" in INDEX_HTML
-    assert 'id="filter-namespace"' in INDEX_HTML
-    assert "Fix Suggestions" in INDEX_HTML
-    assert "metadataLine(" in INDEX_HTML
-    assert "workloadLabel(" in INDEX_HTML
-    assert "Workload Context" in INDEX_HTML
-    assert "Key Signals" in INDEX_HTML
-    assert "Primary Finding" in INDEX_HTML
-    assert "Related Objects" in INDEX_HTML
-    assert "Evidence Timeline" in INDEX_HTML
-    assert "Top Root Candidate" in INDEX_HTML
-    assert "First abnormal signal:" in INDEX_HTML
-    assert 'id="filter-category"' in INDEX_HTML
-    assert "populateCategories(" in INDEX_HTML
-    assert "Primary Signal" in INDEX_HTML
+    assert "K8s Diagnosis Agent" in INDEX_HTML
+    assert "Frontend assets are not built yet." in INDEX_HTML
+    assert "npm run build" in INDEX_HTML
+
+
+def test_framework_source_exists():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "web" / "src" / "App.jsx").exists()
+    assert (root / "web" / "src" / "main.jsx").exists()
 
 
 def test_service_api_shape_matches_ui_expectations():
