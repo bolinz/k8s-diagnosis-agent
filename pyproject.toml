@@ -34,6 +34,10 @@ packages = [
   "agent.tools",
   "agent.triggers",
 ]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"agent.ui" = ["frontend_dist/*", "frontend_dist/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
