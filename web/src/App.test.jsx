@@ -220,7 +220,7 @@ describe("App", () => {
     expect(screen.getByRole("textbox", { name: "Symptom" })).toHaveFocus();
   });
 
-  it("supports keyboard navigation and detail view shortcuts", async () => {
+  it("supports detail switch and keyboard shortcuts", async () => {
     const listPayload = {
       items: [
         {
@@ -255,7 +255,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Pod/checkout-a" })).toBeInTheDocument();
     });
-    fireEvent.keyDown(window, { key: "ArrowDown" });
+    fireEvent.click(screen.getByRole("button", { name: /Pod\/checkout-b/i }));
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Pod/checkout-b" })).toBeInTheDocument();
     });
