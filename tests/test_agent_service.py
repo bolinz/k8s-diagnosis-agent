@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from agent.analyzers.rules import RuleEngine
 from agent.config.settings import Settings
+from agent.metrics import reset_metrics_for_tests, snapshot_metrics
 from agent.models import TriggerContext, WorkloadRef
 from agent.orchestrator.codex_agent import CodexDiagnosisAgent
 from agent.reporting.diagnosis_reporter import DiagnosisReportFormatter
@@ -67,6 +68,26 @@ class FakeKubernetesClient:
                     "timestamp": "2026-03-22T05:00:00+00:00",
                 }
             ]
+        }
+
+    def get_namespace_events(self, namespace):
+        self.calls.append(("get_namespace_events", namespace))
+        if namespace == "missing":
+            return {"error": "namespace not found", "resource": "namespace_events", "namespace": namespace}
+        if namespace == "forbidden":
+            return {"error": "forbidden", "resource": "namespace_events", "namespace": namespace}
+        return {
+            "items": [
+                {
+                    "reason": "BackOff",
+                    "message": "Back-off restarting failed container",
+                    "type": "Warning",
+                    "namespace": namespace,
+                    "timestamp": "2026-03-22T05:00:00+00:00",
+                }
+            ],
+            "window": "recent",
+            "count": 1,
         }
 
     def list_related_pods(self, namespace, kind, name):
@@ -180,6 +201,27 @@ class FakeKubernetesClient:
 
     def get_node_conditions(self, node_name=None):
         return {"items": []}
+
+    def get_node_events(self, node_name):
+        self.calls.append(("get_node_events", node_name))
+        if node_name == "missing-node":
+            return {"error": "node not found", "resource": "node_events", "node_name": node_name}
+        if node_name == "forbidden-node":
+            return {"error": "forbidden", "resource": "node_events", "node_name": node_name}
+        return {
+            "items": [
+                {
+                    "reason": "NodeNotReady",
+                    "message": "Node is not ready",
+                    "type": "Warning",
+                    "namespace": "default",
+                    "timestamp": "2026-03-22T05:00:00+00:00",
+                    "involvedObject": {"kind": "Node", "name": node_name},
+                }
+            ],
+            "window": "recent",
+            "count": 1,
+        }
 
     def get_node_workload_impact(self, node_name):
         self.calls.append(("get_node_workload_impact", node_name))
@@ -322,6 +364,79 @@ def test_build_model_client_selects_openai_and_ollama():
     assert ollama_client.model == "llama3.1"
 
 
+def test_metrics_increment_for_diagnosis_and_tool_calls():
+    reset_metrics_for_tests()
+    client = FakeKubernetesClient()
+    settings = build_settings()
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    response = {
+        "output": [
+            {
+                "type": "function_call",
+                "name": "get_recent_logs",
+                "arguments": "{\"namespace\":\"payments\",\"pod_name\":\"checkout-abc\"}",
+                "call_id": "call_1",
+            }
+        ]
+    }
+    final = {
+        "output_text": json.dumps(
+            {
+                "summary": "Pod restarts because DATABASE_URL is missing.",
+                "severity": "critical",
+                "probableCauses": ["Missing DATABASE_URL."],
+                "evidence": ["Logs show missing DATABASE_URL."],
+                "recommendations": ["Restore secret wiring."],
+                "confidence": 0.9,
+            }
+        )
+    }
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient([response, final]),
+        rule_engine=engine,
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    service = AgentService(settings=settings, client=client, codex_agent=agent)
+    service.process_alert(
+        {
+            "namespace": "payments",
+            "name": "checkout-abc",
+            "kind": "Pod",
+            "symptom": "CrashLoopBackOff",
+            "observed_for_seconds": 600,
+        }
+    )
+    metrics = snapshot_metrics()
+    assert metrics["diagnosis_requests_total"] >= 1
+    assert metrics["tool_calls_total"] >= 1
+    assert metrics["diagnosis_duration_seconds_count"] >= 1
+
+
+def test_metrics_increment_for_fallback_diagnosis():
+    reset_metrics_for_tests()
+    client = FakeKubernetesClient()
+    settings = build_settings()
+    service = AgentService(
+        settings=settings,
+        client=client,
+        codex_agent=build_fallback_agent(),
+    )
+    service.process_alert(
+        {
+            "namespace": "payments",
+            "name": "checkout-abc",
+            "kind": "Pod",
+            "symptom": "CrashLoopBackOff",
+            "observed_for_seconds": 600,
+        }
+    )
+    metrics = snapshot_metrics()
+    assert metrics["diagnosis_requests_total"] >= 1
+    assert metrics["diagnosis_fallback_total"] >= 1
+
+
 def test_build_model_client_rejects_invalid_provider():
     settings = build_settings()
     settings.model_provider = "invalid"
@@ -419,6 +534,53 @@ def test_tool_registry_exposes_new_read_only_tools_without_secret_values():
     assert pvc_status["items"][0]["phase"] == "Pending"
     assert owner_chain["items"][-1]["kind"] == "Deployment"
     assert node_impact["podCount"] == 2
+
+
+def test_tool_registry_get_namespace_events_success_not_found_forbidden():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(client, trigger)
+
+    ok_payload = json.loads(registry.execute("get_namespace_events", {"namespace": "payments"}))
+    not_found_payload = json.loads(registry.execute("get_namespace_events", {"namespace": "missing"}))
+    forbidden_payload = json.loads(registry.execute("get_namespace_events", {"namespace": "forbidden"}))
+
+    assert ok_payload["count"] == 1
+    assert ok_payload["items"][0]["reason"] == "BackOff"
+    assert not_found_payload["resource"] == "namespace_events"
+    assert "not found" in not_found_payload["error"]
+    assert forbidden_payload["resource"] == "namespace_events"
+    assert forbidden_payload["error"] == "forbidden"
+
+
+def test_tool_registry_get_node_events_success_not_found_forbidden():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="NodeNotReadyImpact",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(client, trigger)
+
+    ok_payload = json.loads(registry.execute("get_node_events", {"node_name": "node-a"}))
+    not_found_payload = json.loads(registry.execute("get_node_events", {"node_name": "missing-node"}))
+    forbidden_payload = json.loads(registry.execute("get_node_events", {"node_name": "forbidden-node"}))
+
+    assert ok_payload["count"] == 1
+    assert ok_payload["items"][0]["reason"] == "NodeNotReady"
+    assert ok_payload["items"][0]["involvedObject"]["kind"] == "Node"
+    assert not_found_payload["resource"] == "node_events"
+    assert "not found" in not_found_payload["error"]
+    assert forbidden_payload["resource"] == "node_events"
+    assert forbidden_payload["error"] == "forbidden"
 
 
 def test_tool_registry_serializes_datetime_values():
@@ -584,12 +746,20 @@ def test_formatter_dedupes_report_name_and_targets_report_namespace_shape():
         "k8s-diagnosis-system",
         trigger,
     )
-    status = formatter.build_status(engine_result(), "gpt-5-codex", raw_signal={"reason": "BackOff"})
+    status = formatter.build_status(
+        engine_result(),
+        "gpt-5-codex",
+        raw_signal={"reason": "BackOff"},
+        category="runtime",
+        primary_signal="BackOff",
+    )
     assert body["metadata"]["name"].startswith("diagnosis-")
     assert body["metadata"]["namespace"] == "k8s-diagnosis-system"
     assert body["spec"]["triggerAt"].endswith("+00:00")
     assert status["modelInfo"]["name"] == "gpt-5-codex"
     assert status["rawSignal"]["reason"] == "BackOff"
+    assert status["category"] == "runtime"
+    assert status["primarySignal"] == "BackOff"
 
 
 def test_service_lists_and_reads_reports():
@@ -607,6 +777,8 @@ def test_service_lists_and_reads_reports():
     reports = service.list_reports()
     assert reports[0]["name"] == "diagnosis-a"
     assert reports[0]["severity"] == "critical"
+    assert reports[0]["category"] == "runtime"
+    assert reports[0]["primarySignal"] == "BackOff"
     report = service.get_report("diagnosis-a")
     assert report["workload"]["name"] == "checkout-abc"
     assert report["cluster"] == "prod"
@@ -615,7 +787,28 @@ def test_service_lists_and_reads_reports():
     assert report["rawSignal"]["podPhase"] == "Running"
     assert report["relatedObjects"][0]["role"] == "primary"
     assert report["rootCauseCandidates"][0]["objectRef"]["kind"] == "Deployment"
+    assert report["category"] == "runtime"
+    assert report["primarySignal"] == "BackOff"
     assert service.get_report("missing") is None
+
+
+def test_service_list_reports_supports_category_filter():
+    client = FakeKubernetesClient()
+    settings = build_settings()
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient([]),
+        rule_engine=engine,
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    service = AgentService(settings=settings, client=client, codex_agent=agent)
+    runtime_reports = service.list_reports({"category": ["runtime"]})
+    image_reports = service.list_reports({"category": ["image"]})
+    assert len(runtime_reports) == 1
+    assert runtime_reports[0]["name"] == "diagnosis-a"
+    assert image_reports == []
 
 
 def test_event_mapping_and_dedupe():
@@ -655,6 +848,42 @@ def test_event_mapping_and_dedupe():
     )
     assert failed_mount is not None
     assert failed_mount.symptom == "FailedMount"
+
+    failed_scheduling = map_event_to_trigger(
+        "prod",
+        {
+            "type": "Warning",
+            "reason": "FailedScheduling",
+            "message": "0/3 nodes are available: 3 Insufficient cpu.",
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "payments",
+                "name": "checkout-abc",
+            },
+            "lastTimestamp": "2026-03-22T05:00:01Z",
+        },
+    )
+    assert failed_scheduling is not None
+    assert failed_scheduling.symptom == "Pending"
+    assert "Insufficient cpu" in failed_scheduling.raw_signal["message"]
+
+    failed_image_pull = map_event_to_trigger(
+        "prod",
+        {
+            "type": "Warning",
+            "reason": "Failed",
+            "message": "Failed to pull image \"priv-registry/app:1.2\": unauthorized: authentication required",
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "payments",
+                "name": "checkout-abc",
+            },
+            "lastTimestamp": "2026-03-22T05:00:02Z",
+        },
+    )
+    assert failed_image_pull is not None
+    assert failed_image_pull.symptom == "ErrImagePull"
+    assert "Failed to pull image" in failed_image_pull.raw_signal["message"]
 
     cannot_run = map_event_to_trigger(
         "prod",
@@ -804,8 +1033,8 @@ def test_backfill_rewrites_incomplete_reports():
         def __init__(self):
             self.calls = []
 
-        def upsert_report(self, trigger, diagnosis, model, prefix):
-            self.calls.append((trigger, diagnosis, model, prefix))
+        def upsert_report(self, trigger, diagnosis, model, prefix, category="", primary_signal=""):
+            self.calls.append((trigger, diagnosis, model, prefix, category, primary_signal))
             return {"ok": True}
 
     class IncompleteClient(FakeKubernetesClient):

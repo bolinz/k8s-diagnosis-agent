@@ -50,6 +50,63 @@ def test_fallback_diagnosis_has_specific_image_pull_guidance():
     assert "imagePullSecrets" in diagnosis.recommendations[0]
 
 
+def test_fallback_diagnosis_refines_image_pull_for_auth_failure():
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    trigger = engine.findings_from_snapshot(
+        [
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Pod",
+                "symptom": "ErrImagePull",
+                "observed_for_seconds": 1000,
+                "message": "failed to pull image \"priv-registry/app:1.2\": unauthorized: authentication required",
+            }
+        ]
+    )[0].trigger
+    diagnosis = engine.fallback_diagnosis(trigger)
+    assert "authentication" in diagnosis.probable_causes[0].lower()
+    assert "credentials" in diagnosis.recommendations[0].lower()
+
+
+def test_fallback_diagnosis_refines_image_pull_for_not_found():
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    trigger = engine.findings_from_snapshot(
+        [
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Pod",
+                "symptom": "ImagePullBackOff",
+                "observed_for_seconds": 1000,
+                "message": "failed to pull image \"repo/app:missing\": manifest unknown: manifest unknown",
+            }
+        ]
+    )[0].trigger
+    diagnosis = engine.fallback_diagnosis(trigger)
+    assert "does not exist" in diagnosis.probable_causes[0].lower() or "invalid" in diagnosis.probable_causes[0].lower()
+    assert "tag" in diagnosis.recommendations[0].lower() or "digest" in diagnosis.recommendations[0].lower()
+
+
+def test_fallback_diagnosis_refines_image_pull_for_network_failure():
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    trigger = engine.findings_from_snapshot(
+        [
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Pod",
+                "symptom": "ImagePullBackOff",
+                "observed_for_seconds": 1000,
+                "message": "failed to do request: Head \"https://index.docker.io/v2/\": dial tcp: lookup index.docker.io: no such host",
+            }
+        ]
+    )[0].trigger
+    diagnosis = engine.fallback_diagnosis(trigger)
+    assert "dns" in diagnosis.probable_causes[0].lower() or "network" in diagnosis.probable_causes[0].lower()
+    assert "dns" in diagnosis.recommendations[0].lower() or "egress" in diagnosis.recommendations[0].lower()
+
+
 def test_rule_engine_accepts_new_workload_symptoms():
     engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
     findings = engine.findings_from_snapshot(
@@ -100,3 +157,43 @@ def test_fallback_diagnosis_has_specific_mount_guidance():
     diagnosis = engine.fallback_diagnosis(trigger)
     assert diagnosis.severity == "critical"
     assert "PVC" in diagnosis.recommendations[0]
+
+
+def test_fallback_diagnosis_refines_pending_for_resource_shortage():
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    trigger = engine.findings_from_snapshot(
+        [
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Pod",
+                "symptom": "Pending",
+                "observed_for_seconds": 1000,
+                "reason": "FailedScheduling",
+                "message": "0/3 nodes are available: 3 Insufficient cpu.",
+            }
+        ]
+    )[0].trigger
+    diagnosis = engine.fallback_diagnosis(trigger)
+    assert "insufficient" in diagnosis.probable_causes[0].lower()
+    assert "capacity" in diagnosis.recommendations[0].lower()
+
+
+def test_fallback_diagnosis_refines_failed_mount_for_missing_secret():
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    trigger = engine.findings_from_snapshot(
+        [
+            {
+                "namespace": "payments",
+                "name": "checkout",
+                "kind": "Pod",
+                "symptom": "FailedMount",
+                "observed_for_seconds": 1000,
+                "reason": "FailedMount",
+                "message": "MountVolume.SetUp failed for volume \"app-secret\": secret \"app-secret\" not found",
+            }
+        ]
+    )[0].trigger
+    diagnosis = engine.fallback_diagnosis(trigger)
+    assert "secret" in diagnosis.probable_causes[0].lower()
+    assert "configmap" in diagnosis.recommendations[0].lower() or "secret" in diagnosis.recommendations[0].lower()

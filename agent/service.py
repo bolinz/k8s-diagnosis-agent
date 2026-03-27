@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from time import perf_counter
 import logging
 from typing import Any
 
 from agent.analyzers.rules import RuleEngine
 from agent.config.settings import Settings
 from agent.k8s_client.base import KubernetesReadClient
+from agent.metrics import inc_counter, observe_diagnosis_duration
 from agent.models import DiagnosisResult, PendingFinding, TriggerContext, WorkloadRef
 from agent.orchestrator.codex_agent import CodexDiagnosisAgent
 from agent.orchestrator.responses_client import (
@@ -73,6 +75,8 @@ class AgentService:
         return self.process_trigger(trigger)
 
     def process_trigger(self, trigger: TriggerContext) -> dict:
+        start = perf_counter()
+        inc_counter("diagnosis_requests_total")
         trigger = self._normalize_trigger(trigger)
         trigger = self._augment_trigger_signal(trigger)
         trigger = self._attach_correlation_context(trigger)
@@ -92,9 +96,13 @@ class AgentService:
             trigger,
             self.codex_agent.diagnose(trigger, registry),
         )
+        if diagnosis.used_fallback:
+            inc_counter("diagnosis_fallback_total")
+        category = self._category_for_symptom(trigger.symptom)
+        primary_signal = self._derive_primary_signal(trigger.symptom, trigger.raw_signal)
         writer = self.report_writer
         if writer is None:
-            return {
+            result = {
                 **self.formatter.build_spec(
                     self.formatter.dedupe_name(
                         trigger, self.settings.diagnosis_name_prefix
@@ -106,14 +114,22 @@ class AgentService:
                     diagnosis,
                     self._active_model_name(),
                     raw_signal=trigger.raw_signal,
+                    category=category,
+                    primary_signal=primary_signal,
                 ),
             }
-        return writer.upsert_report(
+            observe_diagnosis_duration(perf_counter() - start)
+            return result
+        result = writer.upsert_report(
             trigger,
             diagnosis,
             self._active_model_name(),
             self.settings.diagnosis_name_prefix,
+            category=category,
+            primary_signal=primary_signal,
         )
+        observe_diagnosis_duration(perf_counter() - start)
+        return result
 
     def process_event_trigger(self, trigger: TriggerContext) -> dict | None:
         key = ":".join(
@@ -148,6 +164,7 @@ class AgentService:
         namespace_filter = (params.get("namespace") or [""])[0]
         severity_filter = (params.get("severity") or [""])[0]
         symptom_filter = (params.get("symptom") or [""])[0]
+        category_filter = (params.get("category") or [""])[0]
         items = [self._normalize_report(item) for item in self.client.list_reports()]
         items.sort(key=lambda item: item.get("lastAnalyzedAt", ""), reverse=True)
         filtered = []
@@ -157,6 +174,8 @@ class AgentService:
             if severity_filter and severity_filter != item["severity"]:
                 continue
             if symptom_filter and symptom_filter not in item["symptom"]:
+                continue
+            if category_filter and category_filter != item["category"]:
                 continue
             filtered.append(item)
         return filtered
@@ -235,6 +254,15 @@ class AgentService:
             "analysisVersion": status.get("analysisVersion", ""),
             "modelInfo": status.get("modelInfo", {}),
             "rawSignal": self._raw_signal_summary(status.get("rawSignal", {})),
+            "category": self._normalize_category(
+                status.get("category", ""),
+                spec.get("symptom", ""),
+            ),
+            "primarySignal": self._normalize_primary_signal(
+                status.get("primarySignal", ""),
+                status.get("rawSignal", {}),
+                spec.get("symptom", ""),
+            ),
         }
 
     def _is_self_workload(self, namespace: str, name: str) -> bool:
@@ -320,15 +348,69 @@ class AgentService:
             for item in normalized.get("evidenceTimeline", [])
             if isinstance(item, dict)
         ]
+        normalized["category"] = (
+            str(normalized.get("category", "")).strip() if normalized.get("category") is not None else ""
+        )
+        normalized["primarySignal"] = (
+            str(normalized.get("primarySignal", "")).strip()
+            if normalized.get("primarySignal") is not None
+            else ""
+        )
         impact = normalized.get("impactSummary", {})
         normalized["impactSummary"] = impact if isinstance(impact, dict) else {}
         return normalized
+
+    def _normalize_category(self, category: str, symptom: str) -> str:
+        if category:
+            return category
+        return self._category_for_symptom(symptom)
+
+    def _normalize_primary_signal(
+        self,
+        primary_signal: str,
+        raw_signal: dict[str, Any],
+        symptom: str,
+    ) -> str:
+        if primary_signal:
+            return primary_signal
+        return self._derive_primary_signal(
+            symptom=symptom,
+            raw_signal=raw_signal if isinstance(raw_signal, dict) else {},
+        )
 
     def _active_model_name(self) -> str:
         model = getattr(self.codex_agent, "model", "")
         if isinstance(model, str) and model:
             return model
         return self.settings.openai_model
+
+    def _category_for_symptom(self, symptom: str) -> str:
+        if symptom in {"ImagePullBackOff", "ErrImagePull"}:
+            return "image"
+        if symptom in {"Pending", "FailedMount", "Evicted", "NodeNotReadyImpact"}:
+            return "scheduling"
+        if symptom in {"CrashLoopBackOff", "OOMKilled", "ProbeFailure", "ContainerCannotRun"}:
+            return "runtime"
+        if symptom in {"ProgressDeadlineExceeded", "ReplicaMismatch"}:
+            return "rollout"
+        if symptom in {"CreateContainerConfigError", "CreateContainerError", "FailedCreatePodSandbox"}:
+            return "configuration"
+        return "general"
+
+    def _derive_primary_signal(self, symptom: str, raw_signal: dict[str, Any]) -> str:
+        for key in (
+            "reason",
+            "containerReason",
+            "deploymentCondition",
+            "podReason",
+            "podPhase",
+            "pvcPhase",
+            "eventType",
+        ):
+            value = raw_signal.get(key)
+            if value:
+                return str(value)
+        return symptom
 
     def _augment_trigger_signal(self, trigger: TriggerContext) -> TriggerContext:
         raw_signal = dict(trigger.raw_signal)

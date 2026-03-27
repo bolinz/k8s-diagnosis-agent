@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 import logging
 
+from agent.metrics import render_prometheus_metrics
 from agent.runtime_logging import get_logger, log_event
 from agent.ui.templates import INDEX_HTML
 
@@ -49,6 +50,23 @@ def serve_http(port: int, service) -> None:
                 status=status.value,
             )
 
+        def _write_text(self, body: str, content_type: str, status=HTTPStatus.OK) -> None:
+            data = body.encode("utf-8")
+            self.send_response(status.value)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "http_response",
+                "request handled",
+                method=self.command,
+                path=self.path,
+                status=status.value,
+            )
+
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             if parsed.path == "/":
@@ -56,6 +74,12 @@ def serve_http(port: int, service) -> None:
                 return
             if parsed.path == "/healthz":
                 self._write_json({"ok": True})
+                return
+            if parsed.path == "/metrics":
+                self._write_text(
+                    render_prometheus_metrics(),
+                    "text/plain; version=0.0.4; charset=utf-8",
+                )
                 return
             if parsed.path == "/api/reports":
                 params = parse_qs(parsed.query)

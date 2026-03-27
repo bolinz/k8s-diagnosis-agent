@@ -2,7 +2,7 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Current release: `v0.4.4`
+Current release: `v0.4.5`
 
 ## Features
 
@@ -131,23 +131,25 @@ kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
 
 ## Release and Versioning
 
-- Current release: `v0.4.4`
-- Python package version: `0.4.4`
-- Helm chart version: `0.4.4`
+- Current release: `v0.4.5`
+- Python package version: `0.4.5`
+- Helm chart version: `0.4.5`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
 
-The current CI workflow:
+The current CI/release workflows:
 
 - runs tests on PRs and pushes
 - pushes container images on `main` and tag pushes
 - uses shell `docker` commands for image build and push
-- does not auto-create GitHub Releases yet
+- auto-creates GitHub Releases on `v*` tag pushes
 
-`v0.4.4` adds provider abstraction, Ollama support, structured runtime logging, provider-accurate runtime model selection, DEBUG log boundary fixes, tool output datetime serialization, and a patch to persist `modelInfo.name` from the active provider model:
+`v0.4.5` expands diagnosis breadth for workload operations and improves operator-facing signals:
 
-- switch between `openai` and `ollama` with explicit `MODEL_PROVIDER`
-- support tool-calling diagnosis through an Ollama client adapter
-- emit structured JSON logs for startup, triggers, tool calls, model requests, and report writes
+- scheduler and mount fallback refinement (`FailedScheduling` and `FailedMount` subtypes)
+- image-pull subtype refinement (auth vs not-found vs network)
+- new read-only tools: `get_namespace_events` and `get_node_events`
+- report/API/UI enrichment with `category` and `primarySignal`
+- minimal runtime metrics exposed via `/metrics`
 
 ## Contributing and License
 

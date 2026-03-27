@@ -66,6 +66,8 @@ class RuleEngine:
             f"symptom={symptom}",
             f"observed_for_seconds={trigger.observed_for_seconds}",
         ]
+        raw_message = str(trigger.raw_signal.get("message", ""))
+        lower_message = raw_message.lower()
         probable_causes: list[str]
         recommendations: list[str]
         severity = "warning"
@@ -81,13 +83,39 @@ class RuleEngine:
             ]
         elif symptom in {"ImagePullBackOff", "ErrImagePull"}:
             severity = "critical"
-            probable_causes = [
-                "Container image tag is missing or registry access is denied"
-            ]
-            recommendations = [
-                "Verify the image reference and imagePullSecrets",
-                "Confirm the target registry is reachable from the cluster",
-            ]
+            subtype = _classify_image_pull_issue(lower_message)
+            if subtype == "auth":
+                probable_causes = [
+                    "Registry authentication failed while pulling the container image"
+                ]
+                recommendations = [
+                    "Verify imagePullSecrets, registry credentials, and service account secret references",
+                    "Confirm the registry repository permissions include pull access",
+                ]
+            elif subtype == "not_found":
+                probable_causes = [
+                    "The image name or tag is invalid, or the referenced artifact does not exist"
+                ]
+                recommendations = [
+                    "Verify image repository and tag/digest exactly match published artifacts",
+                    "Confirm the image exists in the target registry and has not been deleted",
+                ]
+            elif subtype == "network":
+                probable_causes = [
+                    "Network, DNS, or TLS connectivity to the registry failed during image pull"
+                ]
+                recommendations = [
+                    "Check node egress, DNS resolution, proxy/firewall rules, and registry TLS configuration",
+                    "Confirm the registry endpoint is reachable from cluster nodes",
+                ]
+            else:
+                probable_causes = [
+                    "Container image pull failed due to invalid image reference, auth, or registry connectivity"
+                ]
+                recommendations = [
+                    "Verify the image reference and imagePullSecrets",
+                    "Confirm the target registry is reachable from the cluster",
+                ]
         elif symptom == "OOMKilled":
             severity = "critical"
             probable_causes = ["Container memory limit is lower than runtime demand"]
@@ -95,12 +123,27 @@ class RuleEngine:
                 "Inspect memory usage and increase limits or reduce memory spikes"
             ]
         elif symptom == "Pending":
-            probable_causes = [
-                "Scheduler constraints or insufficient cluster capacity prevent placement"
-            ]
-            recommendations = [
-                "Review Pod events for taints, affinity, quota, and resource shortage messages"
-            ]
+            if any(token in lower_message for token in {"insufficient", "didn't have enough", "insufficient cpu", "insufficient memory", "insufficient ephemeral-storage"}):
+                probable_causes = [
+                    "The scheduler could not place the pod because cluster resources are insufficient"
+                ]
+                recommendations = [
+                    "Check node allocatable capacity and current requests; lower pod requests or add capacity"
+                ]
+            elif any(token in lower_message for token in {"taint", "didn't tolerate", "affinity", "selector", "topology"}):
+                probable_causes = [
+                    "Scheduling constraints (taints, affinity, selectors, topology rules) prevent placement"
+                ]
+                recommendations = [
+                    "Review pod tolerations, affinity, node selectors, and topology constraints"
+                ]
+            else:
+                probable_causes = [
+                    "Scheduler constraints or insufficient cluster capacity prevent placement"
+                ]
+                recommendations = [
+                    "Review Pod events for taints, affinity, quota, and resource shortage messages"
+                ]
         elif symptom == "ProbeFailure":
             probable_causes = ["Health probes fail before the service is ready"]
             recommendations = [
@@ -124,12 +167,27 @@ class RuleEngine:
             ]
         elif symptom == "FailedMount":
             severity = "critical"
-            probable_causes = [
-                "A PVC, Secret, ConfigMap, or projected volume cannot be mounted into the pod"
-            ]
-            recommendations = [
-                "Inspect pod events, PVC binding state, and referenced volume sources"
-            ]
+            if any(token in lower_message for token in {"persistentvolumeclaim", "pvc", "not bound", "unbound"}):
+                probable_causes = [
+                    "A referenced PVC is not bound, so the pod cannot mount required storage"
+                ]
+                recommendations = [
+                    "Inspect PVC phase, storage class, and events; resolve pending/binding issues before retrying"
+                ]
+            elif any(token in lower_message for token in {"secret", "configmap", "not found", "couldn't find key"}):
+                probable_causes = [
+                    "A referenced Secret or ConfigMap for a volume mount is missing or invalid"
+                ]
+                recommendations = [
+                    "Verify volume source names and keys for Secrets/ConfigMaps in the pod spec"
+                ]
+            else:
+                probable_causes = [
+                    "A PVC, Secret, ConfigMap, or projected volume cannot be mounted into the pod"
+                ]
+                recommendations = [
+                    "Inspect pod events, PVC binding state, and referenced volume sources"
+                ]
         elif symptom == "FailedCreatePodSandbox":
             severity = "critical"
             probable_causes = [
@@ -179,3 +237,19 @@ class RuleEngine:
             used_fallback=True,
             raw_agent_output={"mode": "fallback"},
         )
+
+
+def _classify_image_pull_issue(lower_message: str) -> str:
+    if any(
+        token in lower_message
+        for token in {"unauthorized", "authentication required", "denied", "forbidden", "no basic auth credentials"}
+    ):
+        return "auth"
+    if any(token in lower_message for token in {"manifest unknown", "not found", "name unknown", "pull access denied"}):
+        return "not_found"
+    if any(
+        token in lower_message
+        for token in {"i/o timeout", "context deadline exceeded", "connection refused", "no such host", "tls handshake timeout", "temporary failure"}
+    ):
+        return "network"
+    return "generic"

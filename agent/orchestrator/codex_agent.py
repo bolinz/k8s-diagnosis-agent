@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.analyzers.rules import RuleEngine
+from agent.metrics import inc_counter
 from agent.models import DiagnosisResult, ToolCallRecord, TriggerContext
 from agent.runtime_logging import get_logger, log_event, truncate_text
 from agent.tools.registry import ToolRegistry
@@ -129,6 +130,7 @@ class CodexDiagnosisAgent:
                     )
                     return self.rule_engine.fallback_diagnosis(trigger)
                 tool_calls += 1
+                inc_counter("tool_calls_total")
                 arguments = json.loads(call.get("arguments") or "{}")
                 log_event(
                     LOGGER,

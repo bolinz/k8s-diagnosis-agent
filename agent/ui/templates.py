@@ -201,6 +201,11 @@ INDEX_HTML = """<!doctype html>
               <option value="info">info</option>
             </select>
           </label>
+          <label>Category
+            <select id="filter-category">
+              <option value="">All</option>
+            </select>
+          </label>
           <label>Symptom
             <input id="filter-symptom" type="text" placeholder="CrashLoopBackOff">
           </label>
@@ -216,7 +221,7 @@ INDEX_HTML = """<!doctype html>
     const state = {
       reports: [],
       selected: null,
-      filters: { namespace: "", severity: "", symptom: "" },
+      filters: { namespace: "", severity: "", category: "", symptom: "" },
       timer: null,
     };
 
@@ -285,6 +290,7 @@ INDEX_HTML = """<!doctype html>
       state.reports = payload.items || [];
       refreshEl.textContent = "Refreshed " + new Date().toLocaleTimeString();
       populateNamespaces();
+      populateCategories();
       renderList();
       if (state.selected) {
         const match = state.reports.find((item) => item.name === state.selected);
@@ -298,6 +304,7 @@ INDEX_HTML = """<!doctype html>
       return state.reports.filter((item) => {
         if (state.filters.namespace && item.namespace !== state.filters.namespace) return false;
         if (state.filters.severity && item.severity !== state.filters.severity) return false;
+        if (state.filters.category && item.category !== state.filters.category) return false;
         if (state.filters.symptom && !item.symptom.includes(state.filters.symptom)) return false;
         return true;
       });
@@ -313,6 +320,16 @@ INDEX_HTML = """<!doctype html>
       select.value = current;
     }
 
+    function populateCategories() {
+      const select = document.getElementById("filter-category");
+      const categories = [...new Set(state.reports.map((item) => item.category).filter(Boolean))].sort();
+      const current = state.filters.category;
+      select.innerHTML = '<option value="">All</option>' + categories.map((category) =>
+        `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`
+      ).join("");
+      select.value = current;
+    }
+
     function renderList() {
       const reports = filteredReports();
       if (!reports.length) {
@@ -324,6 +341,7 @@ INDEX_HTML = """<!doctype html>
           <div class="meta">
             <span class="badge ${severityClass(item.severity)}">${escapeHtml(item.severity)}</span>
             <span>${escapeHtml(item.namespace)}</span>
+            ${hasValue(item.category) ? `<span>${escapeHtml(item.category)}</span>` : ""}
             <span>${escapeHtml(item.symptom)}</span>
           </div>
           <h3>${workloadLabel(item)}</h3>
@@ -362,6 +380,8 @@ INDEX_HTML = """<!doctype html>
         metadataLine("Analysis version", item.analysisVersion),
         metadataLine("Model", item.modelInfo?.name),
         metadataLine("Fallback", item.modelInfo ? String(item.modelInfo.fallback) : ""),
+        metadataLine("Category", item.category),
+        metadataLine("Primary signal", item.primarySignal),
       ];
       if (item.source === "event") {
         metadata.push(
@@ -407,6 +427,7 @@ INDEX_HTML = """<!doctype html>
         <div class="meta">
           <span class="badge ${severityClass(item.severity)}">${escapeHtml(item.severity)}</span>
           <span>${escapeHtml(item.namespace)}</span>
+          ${hasValue(item.category) ? `<span>${escapeHtml(item.category)}</span>` : ""}
           <span>${escapeHtml(item.symptom)}</span>
           <span>confidence ${escapeHtml(item.confidence)}</span>
           ${hasValue(item.cluster) ? `<span>cluster ${escapeHtml(item.cluster)}</span>` : ""}
@@ -423,6 +444,12 @@ INDEX_HTML = """<!doctype html>
           <h3>Key Signals</h3>
           <ul>${signalItems}</ul>
         </div>
+        ${hasValue(item.primarySignal) ? `
+        <div class="section">
+          <h3>Primary Signal</h3>
+          <ul><li>${escapeHtml(item.primarySignal)}</li></ul>
+        </div>
+        ` : ""}
         ${(item.relatedObjects || []).length ? `
         <div class="section">
           <h3>Related Objects</h3>
@@ -469,6 +496,10 @@ INDEX_HTML = """<!doctype html>
       });
       document.getElementById("filter-severity").addEventListener("change", (event) => {
         state.filters.severity = event.target.value.trim();
+        renderList();
+      });
+      document.getElementById("filter-category").addEventListener("change", (event) => {
+        state.filters.category = event.target.value.trim();
         renderList();
       });
       document.getElementById("filter-symptom").addEventListener("input", (event) => {

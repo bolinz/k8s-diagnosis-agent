@@ -103,6 +103,22 @@ def _container_spec_summary(container: Any) -> dict[str, Any]:
     }
 
 
+def _event_summary(item: Any) -> dict[str, Any]:
+    return {
+        "reason": getattr(item, "reason", None),
+        "message": getattr(item, "message", None),
+        "type": getattr(item, "type", None),
+        "namespace": getattr(getattr(item, "metadata", None), "namespace", None),
+        "involvedObject": _coerce_dict(getattr(item, "involved_object", None)),
+        "timestamp": str(
+            getattr(item, "event_time", None)
+            or getattr(item, "last_timestamp", None)
+            or getattr(item, "first_timestamp", None)
+            or ""
+        ),
+    }
+
+
 class RuntimeKubernetesClient:
     def __init__(self, report_namespace: str) -> None:
         if client is None or config is None:
@@ -247,22 +263,7 @@ class RuntimeKubernetesClient:
             )
         except Exception as exc:
             return _api_error(exc, "workload_events", namespace=namespace, kind=kind, name=name)
-        return {
-            "items": [
-                {
-                    "reason": item.reason,
-                    "message": item.message,
-                    "type": item.type,
-                    "timestamp": str(
-                        getattr(item, "event_time", None)
-                        or getattr(item, "last_timestamp", None)
-                        or getattr(item, "first_timestamp", None)
-                        or ""
-                    ),
-                }
-                for item in events.items
-            ]
-        }
+        return {"items": [_event_summary(item) for item in events.items]}
 
     def get_owner_chain(self, namespace: str, kind: str, name: str) -> dict:
         try:
@@ -298,6 +299,14 @@ class RuntimeKubernetesClient:
         result = self.get_workload_events(namespace, kind, name)
         items = result.get("items", []) if isinstance(result, dict) else []
         return {"items": items[:10], "window": "recent"}
+
+    def get_namespace_events(self, namespace: str) -> dict:
+        try:
+            events = self.events.list_namespaced_event(namespace=namespace)
+        except Exception as exc:
+            return _api_error(exc, "namespace_events", namespace=namespace)
+        items = [_event_summary(item) for item in events.items]
+        return {"items": items[:20], "window": "recent", "count": min(len(items), 20)}
 
     def list_related_pods(self, namespace: str, kind: str, name: str) -> dict:
         try:
@@ -549,6 +558,16 @@ class RuntimeKubernetesClient:
             return _coerce_dict(node)
         nodes = self.core.list_node()
         return {"items": [_coerce_dict(item) for item in nodes.items]}
+
+    def get_node_events(self, node_name: str) -> dict:
+        try:
+            events = self.events.list_event_for_all_namespaces(
+                field_selector=f"involvedObject.kind=Node,involvedObject.name={node_name}",
+            )
+        except Exception as exc:
+            return _api_error(exc, "node_events", node_name=node_name)
+        items = [_event_summary(item) for item in events.items]
+        return {"items": items[:20], "window": "recent", "count": min(len(items), 20)}
 
     def get_node_workload_impact(self, node_name: str) -> dict:
         try:

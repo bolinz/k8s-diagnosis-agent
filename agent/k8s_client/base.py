@@ -21,6 +21,9 @@ class KubernetesReadClient(Protocol):
     def get_related_events(self, namespace: str, kind: str, name: str) -> dict:
         ...
 
+    def get_namespace_events(self, namespace: str) -> dict:
+        ...
+
     def list_related_pods(self, namespace: str, kind: str, name: str) -> dict:
         ...
 
@@ -65,6 +68,9 @@ class KubernetesReadClient(Protocol):
     def get_node_conditions(self, node_name: str | None = None) -> dict:
         ...
 
+    def get_node_events(self, node_name: str) -> dict:
+        ...
+
     def get_node_workload_impact(self, node_name: str) -> dict:
         ...
 
@@ -94,5 +100,13 @@ class KubernetesReadClient(Protocol):
 
 
 class DiagnosisReportWriter(Protocol):
-    def upsert_report(self, trigger: TriggerContext, diagnosis: dict) -> dict:
+    def upsert_report(
+        self,
+        trigger: TriggerContext,
+        diagnosis: dict,
+        model: str,
+        prefix: str,
+        category: str = "",
+        primary_signal: str = "",
+    ) -> dict:
         ...

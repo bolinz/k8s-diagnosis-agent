@@ -6,6 +6,7 @@ from hashlib import sha1
 from typing import Any
 import logging
 
+from agent.metrics import inc_counter
 from agent.models import DiagnosisResult, TriggerContext
 from agent.runtime_logging import get_logger, log_event
 
@@ -25,7 +26,7 @@ LOGGER = get_logger("report_writer")
 
 @dataclass
 class DiagnosisReportFormatter:
-    analysis_version: str = "0.3.1"
+    analysis_version: str = "0.4.5"
 
     def build_spec(
         self,
@@ -59,6 +60,8 @@ class DiagnosisReportFormatter:
         diagnosis: DiagnosisResult,
         model: str,
         raw_signal: dict[str, Any] | None = None,
+        category: str | None = None,
+        primary_signal: str | None = None,
     ) -> dict[str, Any]:
         return {
             "phase": "Analyzed",
@@ -75,6 +78,8 @@ class DiagnosisReportFormatter:
             "analysisVersion": self.analysis_version,
             "modelInfo": {"name": model, "fallback": diagnosis.used_fallback},
             "rawSignal": raw_signal or {},
+            "category": category or "",
+            "primarySignal": primary_signal or "",
             "lastAnalyzedAt": _iso(datetime.now(timezone.utc)),
         }
 
@@ -107,6 +112,8 @@ class KubernetesDiagnosisReportWriter:
         diagnosis: DiagnosisResult,
         model: str,
         prefix: str,
+        category: str = "",
+        primary_signal: str = "",
     ) -> dict[str, Any]:
         name = self.formatter.dedupe_name(trigger, prefix)
         namespace = self.report_namespace
@@ -116,6 +123,8 @@ class KubernetesDiagnosisReportWriter:
                 diagnosis,
                 model,
                 raw_signal=trigger.raw_signal,
+                category=category,
+                primary_signal=primary_signal,
             )
         }
         try:
@@ -161,4 +170,5 @@ class KubernetesDiagnosisReportWriter:
             workload_name=trigger.workload.name,
             symptom=trigger.symptom,
         )
+        inc_counter("report_upsert_total")
         return result
