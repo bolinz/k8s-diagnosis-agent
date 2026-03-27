@@ -161,6 +161,10 @@ INDEX_HTML = """<!doctype html>
       padding-left: 18px;
       line-height: 1.5;
     }
+    .timeline-first {
+      color: var(--crit);
+      font-weight: 600;
+    }
     .empty {
       color: var(--muted);
       padding: 28px;
@@ -348,6 +352,7 @@ INDEX_HTML = """<!doctype html>
           <div>${escapeHtml(item.summary)}</div>
           <div class="meta" style="margin-top: 8px;">
             ${item.relatedObjects?.length ? `<span>${escapeHtml(item.relatedObjects.length)} related objects</span>` : ""}
+            ${item.rootCauseCandidates?.length ? `<span>${escapeHtml(item.rootCauseCandidates.length)} root candidates</span>` : ""}
             ${item.rootCauseCandidates?.[0]?.objectRef ? `<span>root ${objectLabel(item.rootCauseCandidates[0].objectRef)}</span>` : ""}
             ${hasValue(item.triggerAt) ? `<span>trigger ${escapeHtml(item.triggerAt)}</span>` : ""}
             ${hasValue(item.lastAnalyzedAt) ? `<span>${escapeHtml(item.lastAnalyzedAt)}</span>` : ""}
@@ -406,7 +411,7 @@ INDEX_HTML = """<!doctype html>
         .map((ref) => `<li>${objectLabel(ref)}${ref.role ? ` (${escapeHtml(ref.role)})` : ""}</li>`)
         .join("");
       const evidenceTimeline = (item.evidenceTimeline || [])
-        .map((entry) => `<li>${entry.time ? `${escapeHtml(entry.time)} - ` : ""}${objectLabel(entry.objectRef)}${entry.signal ? `: ${escapeHtml(entry.signal)}` : ""}</li>`)
+        .map((entry, index) => `<li class="${index === 0 ? "timeline-first" : ""}">${index === 0 ? "First abnormal signal: " : ""}${entry.time ? `${escapeHtml(entry.time)} - ` : ""}${objectLabel(entry.objectRef)}${entry.signal ? `: ${escapeHtml(entry.signal)}` : ""}</li>`)
         .join("");
       const primaryFinding = [
         metadataLine("Kind", item.workload?.kind),
@@ -421,6 +426,14 @@ INDEX_HTML = """<!doctype html>
         metadataLine("Cross namespace", hasValue(item.impactSummary?.crossNamespace) ? String(item.impactSummary.crossNamespace) : ""),
         metadataLine("Related reports", item.impactSummary?.relatedReportCount),
       ].filter(Boolean).join("");
+      const topRoot = (item.rootCauseCandidates || [])[0];
+      const topRootBlock = topRoot ? [
+        metadataLine("Object", objectLabel(topRoot.objectRef)),
+        metadataLine("Reason", topRoot.reason),
+        metadataLine("Confidence", hasValue(topRoot.confidence) ? String(topRoot.confidence) : ""),
+        metadataLine("Score", hasValue(topRoot.score) ? String(topRoot.score) : ""),
+        metadataLine("Rank reasons", Array.isArray(topRoot.rankReasons) ? topRoot.rankReasons.join(", ") : ""),
+      ].filter(Boolean).join("") : "";
       detailEl.innerHTML = `
         <h2>${workloadLabel(item)}</h2>
         <p class="summary">${escapeHtml(item.summary)}</p>
@@ -444,6 +457,12 @@ INDEX_HTML = """<!doctype html>
           <h3>Key Signals</h3>
           <ul>${signalItems}</ul>
         </div>
+        ${topRootBlock ? `
+        <div class="section">
+          <h3>Top Root Candidate</h3>
+          <ul>${topRootBlock}</ul>
+        </div>
+        ` : ""}
         ${hasValue(item.primarySignal) ? `
         <div class="section">
           <h3>Primary Signal</h3>
