@@ -2,7 +2,7 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Current release: `v0.4.7`
+Current release: `v0.4.8`
 
 ## Features
 
@@ -27,7 +27,7 @@ Current release: `v0.4.7`
 
 - Scheduled anomaly scans
 - Warning event-triggered diagnosis
-- Alert webhook ingestion via `POST /alert`
+- Alert webhook ingestion via async `POST /alert`
 
 Current supported symptoms:
 
@@ -137,9 +137,9 @@ kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
 
 ## Release and Versioning
 
-- Current release: `v0.4.7`
-- Python package version: `0.4.7`
-- Helm chart version: `0.4.7`
+- Current release: `v0.4.8`
+- Python package version: `0.4.8`
+- Helm chart version: `0.4.8`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
 
 The current CI/release workflows:
@@ -148,6 +148,12 @@ The current CI/release workflows:
 - pushes container images on `main` and tag pushes
 - uses shell `docker` commands for image build and push
 - auto-creates GitHub Releases on `v*` tag pushes
+
+`v0.4.8` is a reliability patch release for webhook execution flow:
+
+- `POST /alert` now returns immediately with `202` and `requestId`, and diagnosis runs asynchronously
+- new `GET /api/alerts/{requestId}` endpoint to inspect alert task status/result
+- HTTP response writing now handles `BrokenPipeError` and `ConnectionResetError` gracefully to avoid traceback noise when clients disconnect
 
 `v0.4.7` extends controlled autonomous probing and attribution clarity:
 
@@ -179,3 +185,4 @@ The current CI/release workflows:
 ## OpenAI Runtime Note
 
 The runtime integrates with the OpenAI Responses API and uses `gpt-5-codex` by default for tool-assisted diagnosis. The cluster service does not require the Codex desktop application or CLI.
+- Alert task status query via `GET /api/alerts/{requestId}`
