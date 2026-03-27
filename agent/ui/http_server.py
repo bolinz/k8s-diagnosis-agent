@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import mimetypes
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 import logging
 import threading
@@ -30,6 +32,10 @@ def _extract_report_name(report: Any) -> str:
     if isinstance(metadata, dict):
         return str(metadata.get("name", "")).strip()
     return ""
+
+
+def _resolve_frontend_dist_dir() -> Path:
+    return Path(__file__).resolve().parent / "frontend_dist"
 
 
 class AlertTaskManager:
@@ -111,6 +117,9 @@ class AlertTaskManager:
 
 def serve_http(port: int, service) -> None:
     alert_tasks = AlertTaskManager(service)
+    index_html = INDEX_HTML
+    frontend_dist = _resolve_frontend_dist_dir()
+    frontend_index = frontend_dist / "index.html"
 
     class Handler(BaseHTTPRequestHandler):
         def _write_json(self, payload, status=HTTPStatus.OK) -> None:
@@ -153,11 +162,43 @@ def serve_http(port: int, service) -> None:
                 status=status.value,
             )
 
+        def _write_file(self, path: Path) -> None:
+            try:
+                data = path.read_bytes()
+            except FileNotFoundError:
+                self._write_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            mime, _ = mimetypes.guess_type(path.name)
+            self._write_bytes(data, mime or "application/octet-stream", HTTPStatus.OK)
+
+        def _serve_frontend_asset(self, request_path: str) -> bool:
+            if not frontend_dist.exists():
+                return False
+            if request_path == "/":
+                if frontend_index.exists():
+                    self._write_file(frontend_index)
+                    return True
+                return False
+            clean = request_path.lstrip("/")
+            asset = (frontend_dist / clean).resolve()
+            if not str(asset).startswith(str(frontend_dist.resolve())):
+                self._write_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+                return True
+            if asset.exists() and asset.is_file():
+                self._write_file(asset)
+                return True
+            return False
+
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             if parsed.path == "/":
-                self._write_html(INDEX_HTML)
+                if self._serve_frontend_asset("/"):
+                    return
+                self._write_html(index_html)
                 return
+            if parsed.path.startswith("/assets/") or parsed.path in {"/favicon.svg", "/vite.svg"}:
+                if self._serve_frontend_asset(parsed.path):
+                    return
             if parsed.path == "/healthz":
                 self._write_json({"ok": True})
                 return

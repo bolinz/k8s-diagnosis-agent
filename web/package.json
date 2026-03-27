@@ -1,0 +1,30 @@
+{
+  "name": "k8s-diagnosis-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "test": "vitest run",
+    "preview:serve": "vite",
+    "test:e2e": "playwright test",
+    "test:e2e:a11y": "start-server-and-test preview:serve http://127.0.0.1:18084/healthz \"PLAYWRIGHT_BASE_URL=http://127.0.0.1:18084 playwright test tests-e2e/accessibility.spec.ts\"",
+    "test:e2e:with-server": "start-server-and-test preview:serve http://127.0.0.1:18084/healthz \"PLAYWRIGHT_BASE_URL=http://127.0.0.1:18084 npm run test:e2e\""
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@playwright/test": "^1.53.0",
+    "jsdom": "^26.1.0",
+    "start-server-and-test": "^2.0.10",
+    "vite": "^5.4.12",
+    "vitest": "^2.1.9"
+  }
+}

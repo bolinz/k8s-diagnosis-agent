@@ -2,7 +2,8 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Current release: `v0.4.8`
+Latest stable release: `v0.4.8`  
+Next planned release: `v0.5.0`
 
 ## Features
 
@@ -47,6 +48,7 @@ cd k8s-diagnosis-agent
 python3 -m pip install -e ".[dev]"
 python3 -m pytest -q
 python3 -m agent.app run-once
+cd web && npm install && npm run build
 ```
 
 ### Container Image
@@ -114,6 +116,31 @@ Secrets and image pull notes:
 - `k8s-diagnosis-agent-secrets` may contain `OPENAI_API_KEY`; it is optional
 - `ghcr-creds` is used to pull private or rate-limited GHCR images
 
+Frontend build notes:
+
+- Framework UI source is under `web/` (React + Vite)
+- Build output is `agent/ui/frontend_dist/`
+- HTTP server serves `frontend_dist` from `/` and `/assets/*` when present
+- Node mock preview: `cd web && npm run preview:serve`
+- Frontend unit tests: `cd web && npm run test`
+- Frontend e2e tests (Playwright): `cd web && npm run test:e2e`
+- Frontend e2e with managed preview server: `cd web && npm run test:e2e:with-server`
+
+Frontend timeline/workbench interactions:
+
+- Horizontal timeline with window filter (`all/6h/1h/15m/5m`) and search
+- Event density strip for quick jump to dense time buckets
+- Event navigator grouped by signal with collapse/expand controls
+- Group sort modes in navigator (`By Count` / `By Time`)
+- Persistent UI preferences (timezone, auto-refresh, ops panel, timeline group sort)
+- Keyboard shortcuts:
+  - `/`: focus symptom search
+  - `j` / `k`: next/previous report
+  - `1` / `2` / `3` / `4`: switch detail view (`all/overview/attribution/timeline`)
+  - `,` / `.`: previous/next timeline event
+  - `o`: toggle observability panel
+  - `?`: toggle shortcut help panel
+
 Example Ollama runtime configuration:
 
 ```bash
@@ -151,19 +178,27 @@ Latest validated run (2026-03-27) passed on cluster `<redacted-cluster>`, produc
 
 ## Release and Versioning
 
-- Current release: `v0.4.8`
-- Python package version: `0.4.8`
-- Helm chart version: `0.4.8`
+- Latest stable release: `v0.4.8`
+- Next planned release: `v0.5.0`
+- Python package version (branch target): `0.5.0`
+- Helm chart version (branch target): `0.5.0`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
 
 The current CI/release workflows:
 
-- runs tests on PRs and pushes
+- runs backend and frontend tests (including Playwright e2e) on PRs and pushes
 - pushes container images on `main` and tag pushes
 - uses shell `docker` commands for image build and push
 - auto-creates GitHub Releases on `v*` tag pushes
 
-`v0.4.8` is a reliability patch release for webhook execution flow:
+`v0.5.0` (planned) is a major UI/operability release that includes:
+
+- timeline density strip + focused event navigation
+- grouped event navigator with sorting/collapse and keyboard shortcuts
+- shortcut help panel and persisted timeline group sort preferences
+- stronger frontend CI gating (`vitest + playwright e2e`)
+
+`v0.4.8` is the latest reliability patch release for webhook execution flow:
 
 - `POST /alert` now returns immediately with `202` and `requestId`, and diagnosis runs asynchronously
 - new `GET /api/alerts/{requestId}` endpoint to inspect alert task status/result

@@ -5,6 +5,11 @@ __pycache__/
 .env
 dist/
 build/
+web/node_modules/
+web/.vite/
+web/test-results/
+web/playwright-report/
+agent/ui/frontend_dist/
 *.egg-info/
 .DS_Store
 **/.DS_Store
