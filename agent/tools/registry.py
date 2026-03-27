@@ -44,9 +44,17 @@ class RegisteredTool:
 
 
 class ToolRegistry:
-    def __init__(self, client: KubernetesReadClient, trigger: TriggerContext) -> None:
+    def __init__(
+        self,
+        client: KubernetesReadClient,
+        trigger: TriggerContext,
+        scope_mode: str = "strict",
+        allowed_namespaces: set[str] | None = None,
+    ) -> None:
         self.client = client
         self.trigger = trigger
+        self.scope_mode = scope_mode if scope_mode in {"strict", "relaxed"} else "strict"
+        self.allowed_namespaces = set(allowed_namespaces or set())
         self._tools = {
             tool.name: tool for tool in self._build_tools()
         }
@@ -57,8 +65,38 @@ class ToolRegistry:
     def execute(self, name: str, arguments: JSON) -> str:
         if name not in self._tools:
             return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=True)
+        guard_error = self._guard_arguments(name, arguments)
+        if guard_error:
+            return json.dumps(guard_error, ensure_ascii=True, sort_keys=True)
         result = self._tools[name].handler(arguments)
         return json.dumps(_json_friendly(result), ensure_ascii=True, sort_keys=True)
+
+    def _guard_arguments(self, name: str, arguments: JSON) -> JSON | None:
+        namespace = arguments.get("namespace")
+        if namespace and name not in {"search_similar_reports"}:
+            trigger_namespace = self.trigger.workload.namespace
+            if self.scope_mode == "relaxed":
+                allowed_set = {trigger_namespace, *self.allowed_namespaces} - {""}
+                if namespace not in allowed_set:
+                    return {
+                        "error": "namespace out of allowed scope",
+                        "resource": "tool_guard",
+                        "tool": name,
+                        "namespace": namespace,
+                        "scopeMode": self.scope_mode,
+                        "allowedNamespaces": sorted(allowed_set),
+                    }
+                return None
+            if trigger_namespace and namespace != trigger_namespace:
+                return {
+                    "error": "namespace out of allowed scope",
+                    "resource": "tool_guard",
+                    "tool": name,
+                    "namespace": namespace,
+                    "scopeMode": self.scope_mode,
+                    "allowedNamespace": trigger_namespace,
+                }
+        return None
 
     def _build_tools(self) -> list[RegisteredTool]:
         workload_defaults = {

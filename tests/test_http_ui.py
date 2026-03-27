@@ -21,6 +21,8 @@ def test_ui_template_contains_expected_sections():
     assert "Primary Finding" in INDEX_HTML
     assert "Related Objects" in INDEX_HTML
     assert "Evidence Timeline" in INDEX_HTML
+    assert "Top Root Candidate" in INDEX_HTML
+    assert "First abnormal signal:" in INDEX_HTML
     assert 'id="filter-category"' in INDEX_HTML
     assert "populateCategories(" in INDEX_HTML
     assert "Primary Signal" in INDEX_HTML
@@ -62,6 +64,8 @@ def test_service_api_shape_matches_ui_expectations():
     assert detail["rootCauseCandidates"]
     assert detail["evidenceTimeline"]
     assert detail["impactSummary"]["workloadCount"] == 1
+    assert detail["modelInfo"]["traceId"] == "trace-a"
+    assert detail["diagnosisTrace"]["traceId"] == "trace-a"
 
 
 def test_service_does_not_emit_unknown_or_na_placeholders():

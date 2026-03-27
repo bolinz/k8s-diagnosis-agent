@@ -11,6 +11,19 @@ def _int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _csv_env(name: str) -> tuple[str, ...]:
+    value = os.getenv(name, "")
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return tuple(items)
+
+
+def _scope_mode_env(name: str, default: str) -> str:
+    value = os.getenv(name, default).strip().lower()
+    if value in {"strict", "relaxed"}:
+        return value
+    return default
+
+
 @dataclass
 class Settings:
     model_provider: str
@@ -23,12 +36,16 @@ class Settings:
     min_observation_seconds: int
     webhook_port: int
     max_tool_calls: int
+    max_diagnosis_seconds: int
     max_input_bytes: int
     request_timeout_seconds: int
     api_base_url: str
     ollama_base_url: str
     diagnosis_name_prefix: str
     event_dedupe_window_seconds: int
+    event_storm_threshold: int
+    scope_mode: str
+    scope_allowed_namespaces: tuple[str, ...]
     workload_name: str
     log_level: str
 
@@ -51,6 +68,7 @@ class Settings:
             ),
             webhook_port=_int_env("K8S_DIAGNOSIS_WEBHOOK_PORT", 8080),
             max_tool_calls=_int_env("K8S_DIAGNOSIS_MAX_TOOL_CALLS", 8),
+            max_diagnosis_seconds=_int_env("K8S_DIAGNOSIS_MAX_DIAGNOSIS_SECONDS", 45),
             max_input_bytes=_int_env("K8S_DIAGNOSIS_MAX_INPUT_BYTES", 20000),
             request_timeout_seconds=_int_env(
                 "K8S_DIAGNOSIS_REQUEST_TIMEOUT_SECONDS", 45
@@ -63,6 +81,9 @@ class Settings:
             event_dedupe_window_seconds=_int_env(
                 "K8S_DIAGNOSIS_EVENT_DEDUPE_WINDOW_SECONDS", 300
             ),
+            event_storm_threshold=_int_env("K8S_DIAGNOSIS_EVENT_STORM_THRESHOLD", 5),
+            scope_mode=_scope_mode_env("K8S_DIAGNOSIS_SCOPE_MODE", "strict"),
+            scope_allowed_namespaces=_csv_env("K8S_DIAGNOSIS_SCOPE_ALLOWLIST"),
             workload_name=os.getenv("K8S_DIAGNOSIS_WORKLOAD_NAME", "k8s-diagnosis-agent"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )

@@ -296,7 +296,13 @@ class FakeKubernetesClient:
                         "relatedReportCount": 0,
                     },
                     "analysisVersion": "0.3.0",
-                    "modelInfo": {"name": "gpt-5-codex", "fallback": False},
+                    "modelInfo": {"name": "gpt-5-codex", "fallback": False, "traceId": "trace-a"},
+                    "diagnosisTrace": {
+                        "traceId": "trace-a",
+                        "toolCallsUsed": 2,
+                        "scopeGuardHits": 0,
+                        "fallbackReason": "",
+                    },
                     "rawSignal": {
                         "reason": "BackOff",
                         "message": "restart",
@@ -330,12 +336,16 @@ def build_settings() -> Settings:
         min_observation_seconds=600,
         webhook_port=8080,
         max_tool_calls=8,
+        max_diagnosis_seconds=45,
         max_input_bytes=20000,
         request_timeout_seconds=30,
         api_base_url="https://api.openai.com/v1",
         ollama_base_url="http://127.0.0.1:11434",
         diagnosis_name_prefix="diagnosis",
         event_dedupe_window_seconds=300,
+        event_storm_threshold=5,
+        scope_mode="strict",
+        scope_allowed_namespaces=(),
         workload_name="k8s-diagnosis-agent",
         log_level="INFO",
     )
@@ -362,6 +372,22 @@ def test_build_model_client_selects_openai_and_ollama():
     ollama_client = build_model_client(settings)
     assert ollama_client.provider_name == "ollama"
     assert ollama_client.model == "llama3.1"
+
+
+def test_settings_scope_mode_and_allowlist_from_env(monkeypatch):
+    monkeypatch.setenv("K8S_DIAGNOSIS_SCOPE_MODE", "relaxed")
+    monkeypatch.setenv("K8S_DIAGNOSIS_SCOPE_ALLOWLIST", "kube-system,monitoring")
+    monkeypatch.setenv("K8S_DIAGNOSIS_EVENT_STORM_THRESHOLD", "7")
+    settings = Settings.from_env()
+    assert settings.scope_mode == "relaxed"
+    assert settings.scope_allowed_namespaces == ("kube-system", "monitoring")
+    assert settings.event_storm_threshold == 7
+
+
+def test_settings_invalid_scope_mode_falls_back_to_strict(monkeypatch):
+    monkeypatch.setenv("K8S_DIAGNOSIS_SCOPE_MODE", "invalid-mode")
+    settings = Settings.from_env()
+    assert settings.scope_mode == "strict"
 
 
 def test_metrics_increment_for_diagnosis_and_tool_calls():
@@ -553,10 +579,83 @@ def test_tool_registry_get_namespace_events_success_not_found_forbidden():
 
     assert ok_payload["count"] == 1
     assert ok_payload["items"][0]["reason"] == "BackOff"
-    assert not_found_payload["resource"] == "namespace_events"
-    assert "not found" in not_found_payload["error"]
-    assert forbidden_payload["resource"] == "namespace_events"
-    assert forbidden_payload["error"] == "forbidden"
+    assert not_found_payload["resource"] == "tool_guard"
+    assert not_found_payload["allowedNamespace"] == "payments"
+    assert forbidden_payload["resource"] == "tool_guard"
+    assert forbidden_payload["allowedNamespace"] == "payments"
+
+
+def test_tool_registry_blocks_cross_namespace_access():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(client, trigger)
+    payload = json.loads(
+        registry.execute(
+            "get_pod_events",
+            {"namespace": "kube-system", "pod_name": "coredns-abc"},
+        )
+    )
+    assert payload["resource"] == "tool_guard"
+    assert payload["tool"] == "get_pod_events"
+    assert payload["allowedNamespace"] == "payments"
+    assert payload["scopeMode"] == "strict"
+
+
+def test_tool_registry_relaxed_scope_allows_explicit_allowlist_namespace():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(
+        client,
+        trigger,
+        scope_mode="relaxed",
+        allowed_namespaces={"kube-system"},
+    )
+    payload = json.loads(
+        registry.execute(
+            "get_pod_events",
+            {"namespace": "kube-system", "pod_name": "coredns-abc"},
+        )
+    )
+    assert "error" not in payload
+    assert payload["items"][0]["reason"] == "BackOff"
+
+
+def test_tool_registry_relaxed_scope_blocks_non_allowlisted_namespace():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(
+        client,
+        trigger,
+        scope_mode="relaxed",
+        allowed_namespaces={"kube-system"},
+    )
+    payload = json.loads(
+        registry.execute(
+            "get_pod_events",
+            {"namespace": "default", "pod_name": "nginx-abc"},
+        )
+    )
+    assert payload["resource"] == "tool_guard"
+    assert payload["scopeMode"] == "relaxed"
+    assert payload["allowedNamespaces"] == ["kube-system", "payments"]
 
 
 def test_tool_registry_get_node_events_success_not_found_forbidden():
@@ -653,6 +752,8 @@ def test_codex_agent_handles_function_call_then_structured_result():
     assert diagnosis.summary.startswith("Checkout pod crashes")
     assert diagnosis.confidence == 0.93
     assert client.calls[0][0] == "get_recent_logs"
+    assert diagnosis.raw_agent_output.get("trace", {}).get("toolCallsUsed", 0) >= 1
+    assert diagnosis.raw_agent_output.get("trace", {}).get("traceId")
 
 
 def test_codex_agent_normalizes_string_fields_and_severity():
@@ -710,6 +811,45 @@ def test_codex_agent_falls_back_when_model_output_is_invalid():
         model="gpt-5-codex",
         max_tool_calls=8,
         max_input_bytes=20000,
+    )
+    diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
+    assert diagnosis.used_fallback is True
+    assert diagnosis.severity == "critical"
+    assert diagnosis.raw_agent_output.get("trace", {}).get("fallbackReason") == "invalid_model_json"
+
+
+def test_codex_agent_falls_back_when_diagnosis_time_budget_exceeded():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="ImagePullBackOff",
+        observed_for_seconds=1800,
+    )
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {
+                            "summary": "will never be used",
+                            "severity": "critical",
+                            "probableCauses": ["x"],
+                            "evidence": ["y"],
+                            "recommendations": ["z"],
+                            "confidence": 0.8,
+                        }
+                    )
+                }
+            ]
+        ),
+        rule_engine=engine,
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+        max_diagnosis_seconds=0,
     )
     diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
     assert diagnosis.used_fallback is True
@@ -801,6 +941,22 @@ def test_formatter_dedupes_report_name_and_targets_report_namespace_shape():
     assert status["primarySignal"] == "BackOff"
 
 
+def test_formatter_writes_trace_into_status_model_info():
+    formatter = DiagnosisReportFormatter()
+    diagnosis = engine_result()
+    diagnosis.raw_agent_output = {
+        "trace": {
+            "traceId": "trace-123",
+            "toolCallsUsed": 2,
+            "scopeGuardHits": 1,
+            "fallbackReason": "",
+        }
+    }
+    status = formatter.build_status(diagnosis, "gpt-5-codex")
+    assert status["modelInfo"]["traceId"] == "trace-123"
+    assert status["diagnosisTrace"]["toolCallsUsed"] == 2
+
+
 def test_service_lists_and_reads_reports():
     client = FakeKubernetesClient()
     settings = build_settings()
@@ -823,6 +979,8 @@ def test_service_lists_and_reads_reports():
     assert report["cluster"] == "prod"
     assert report["triggerAt"]
     assert report["analysisVersion"] == "0.3.0"
+    assert report["modelInfo"]["traceId"] == "trace-a"
+    assert report["diagnosisTrace"]["traceId"] == "trace-a"
     assert report["rawSignal"]["podPhase"] == "Running"
     assert report["relatedObjects"][0]["role"] == "primary"
     assert report["rootCauseCandidates"][0]["objectRef"]["kind"] == "Deployment"
@@ -970,6 +1128,56 @@ def test_event_mapping_and_dedupe():
     second = service.process_event_trigger(trigger)
     assert first is not None
     assert second is None
+
+
+def test_event_storm_threshold_emits_single_aggregated_report():
+    trigger = TriggerContext(
+        source="event",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="CrashLoopBackOff",
+        observed_for_seconds=0,
+        raw_signal={"reason": "BackOff", "message": "Back-off restarting failed container"},
+    )
+    client = FakeKubernetesClient()
+    settings = build_settings()
+    settings.event_storm_threshold = 3
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {
+                            "summary": "Pod is repeatedly restarting.",
+                            "severity": "warning",
+                            "probableCauses": ["Repeated crash loop detected."],
+                            "evidence": ["Warning event BackOff observed."],
+                            "recommendations": ["Inspect container logs."],
+                            "confidence": 0.7,
+                        }
+                    )
+                }
+            ]
+        ),
+        rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    service = AgentService(settings=settings, client=client, codex_agent=agent)
+    first = service.process_event_trigger(trigger)
+    second = service.process_event_trigger(trigger)
+    third = service.process_event_trigger(trigger)
+    fourth = service.process_event_trigger(trigger)
+    assert first is not None
+    assert second is None
+    assert third is not None
+    assert third["status"]["rawSignal"]["aggregated"] is True
+    assert third["status"]["rawSignal"]["stormCount"] == 3
+    assert third["status"]["modelInfo"]["fallback"] is True
+    assert third["status"]["modelInfo"]["traceId"]
+    assert third["status"]["diagnosisTrace"]["fallbackReason"] == "event_storm_aggregated"
+    assert fourth is None
 
 
 def test_event_mapping_skips_events_without_object_name():
