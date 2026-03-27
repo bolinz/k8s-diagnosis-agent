@@ -463,6 +463,53 @@ def test_metrics_increment_for_fallback_diagnosis():
     assert metrics["diagnosis_fallback_total"] >= 1
 
 
+def test_process_alert_supports_workload_ref_payload_shape():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+
+    report = service.process_alert(
+        {
+            "source": "manual-test",
+            "cluster": "admin@rtx2080",
+            "namespace": "kube-system",
+            "workloadRef": {"kind": "Pod", "name": "coredns-6b4c956686-285zk"},
+            "symptom": "ImagePullBackOff",
+            "observedFor": "180s",
+            "triggerAt": "2026-03-27T22:10:00+08:00",
+        }
+    )
+
+    assert report["spec"]["cluster"] == "admin@rtx2080"
+    assert report["spec"]["namespace"] == "kube-system"
+    assert report["spec"]["workloadRef"]["kind"] == "Pod"
+    assert report["spec"]["workloadRef"]["name"] == "coredns-6b4c956686-285zk"
+    assert report["spec"]["observedFor"] == 180
+    assert report["spec"]["triggerAt"] == "2026-03-27T14:10:00+00:00"
+
+
+def test_process_alert_observed_for_seconds_accepts_string_suffix():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+
+    report = service.process_alert(
+        {
+            "namespace": "payments",
+            "name": "checkout-abc",
+            "kind": "Pod",
+            "symptom": "Pending",
+            "observed_for_seconds": "95s",
+        }
+    )
+
+    assert report["spec"]["observedFor"] == 95
+
+
 def test_build_model_client_rejects_invalid_provider():
     settings = build_settings()
     settings.model_provider = "invalid"

@@ -53,28 +53,81 @@ class AgentService:
         return results
 
     def process_alert(self, payload: dict) -> dict:
+        workload_ref = payload.get("workloadRef", {})
+        workload = workload_ref if isinstance(workload_ref, dict) else {}
+        namespace = (
+            str(payload.get("namespace", "")).strip()
+            or str(workload.get("namespace", "")).strip()
+            or "default"
+        )
+        name = (
+            str(payload.get("name", "")).strip()
+            or str(payload.get("pod_name", "")).strip()
+            or str(workload.get("name", "")).strip()
+        )
+        kind = (
+            str(payload.get("kind", "")).strip()
+            or str(workload.get("kind", "")).strip()
+            or "Pod"
+        )
+        symptom = str(payload.get("symptom", "Pending")).strip() or "Pending"
+        observed_for_seconds = self._coerce_observed_seconds(
+            payload.get("observed_for_seconds", payload.get("observedFor", 0))
+        )
+        trigger_at = self._parse_trigger_time(payload)
+        cluster = str(payload.get("cluster", "")).strip() or self.settings.cluster_name
         log_event(
             LOGGER,
             logging.INFO,
             "alert_received",
             "alert webhook received",
-            namespace=payload.get("namespace", "default"),
-            workload_name=payload.get("name", payload.get("pod_name", "unknown")),
-            workload_kind=payload.get("kind", "Pod"),
-            symptom=payload.get("symptom", "Pending"),
+            namespace=namespace,
+            workload_name=name or "",
+            workload_kind=kind,
+            symptom=symptom,
         )
-        namespace = payload.get("namespace", "default")
-        name = payload.get("name", payload.get("pod_name", "unknown"))
-        kind = payload.get("kind", "Pod")
         trigger = TriggerContext(
             source="alert",
-            cluster=self.settings.cluster_name,
+            cluster=cluster,
             workload=WorkloadRef(kind=kind, namespace=namespace, name=name),
-            symptom=payload.get("symptom", "Pending"),
-            observed_for_seconds=int(payload.get("observed_for_seconds", 0)),
+            symptom=symptom,
+            observed_for_seconds=observed_for_seconds,
+            trigger_at=trigger_at,
             raw_signal=payload,
         )
         return self.process_trigger(trigger)
+
+    def _coerce_observed_seconds(self, value: Any) -> int:
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, (int, float)):
+            return max(0, int(value))
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if not normalized:
+                return 0
+            if normalized.endswith("s"):
+                normalized = normalized[:-1].strip()
+            try:
+                return max(0, int(float(normalized)))
+            except ValueError:
+                return 0
+        return 0
+
+    def _parse_trigger_time(self, payload: dict[str, Any]) -> datetime:
+        raw_value = payload.get("triggerAt") or payload.get("trigger_at")
+        if isinstance(raw_value, str):
+            value = raw_value.strip()
+            if value:
+                normalized = value.replace("Z", "+00:00")
+                try:
+                    parsed = datetime.fromisoformat(normalized)
+                    if parsed.tzinfo is None:
+                        return parsed.replace(tzinfo=timezone.utc)
+                    return parsed
+                except ValueError:
+                    pass
+        return datetime.now(timezone.utc)
 
     def process_trigger(self, trigger: TriggerContext) -> dict:
         start = perf_counter()
