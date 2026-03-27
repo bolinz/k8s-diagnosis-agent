@@ -11,7 +11,7 @@ from agent.config.settings import Settings
 from agent.k8s_client.base import KubernetesReadClient
 from agent.metrics import inc_counter, observe_diagnosis_duration
 from agent.models import DiagnosisResult, PendingFinding, TriggerContext, WorkloadRef
-from agent.orchestrator.codex_agent import CodexDiagnosisAgent
+from agent.orchestrator.diagnosis_agent import DiagnosisAgent
 from agent.orchestrator.responses_client import (
     ModelClient,
     OllamaResponsesClient,
@@ -29,7 +29,7 @@ LOGGER = get_logger("agent_service")
 class AgentService:
     settings: Settings
     client: KubernetesReadClient
-    codex_agent: CodexDiagnosisAgent
+    codex_agent: DiagnosisAgent
     report_writer: object | None = None
     formatter: DiagnosisReportFormatter = field(default_factory=DiagnosisReportFormatter)
     recent_events: dict[str, datetime] = field(default_factory=dict)
@@ -918,7 +918,7 @@ def build_runtime_service(settings: Settings) -> AgentService:
         cluster_name=settings.cluster_name,
         min_observation_seconds=settings.min_observation_seconds,
     )
-    codex_agent = CodexDiagnosisAgent(
+    codex_agent = DiagnosisAgent(
         responses_client=responses_client,
         rule_engine=engine,
         model=responses_client.model,
