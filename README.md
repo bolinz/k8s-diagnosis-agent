@@ -135,6 +135,20 @@ kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
 - Tool calls are scope-guarded to the trigger namespace for namespaced APIs
 - In `relaxed` scope mode, namespaced probing is limited to trigger namespace plus explicit allowlist
 
+## Capability Validation
+
+The project includes a reproducible complex-failure integration scenario:
+
+- guide: `docs/testing/complex-failure-e2e.md`
+- injector: `deploy/e2e/complex-failure.yaml`
+- runner/assertion: `scripts/e2e/run_complex_failure.sh` + `scripts/e2e/assert_complex_failure.py`
+
+Latest validated run (2026-03-27) passed on cluster `admin@rtx2080`, producing:
+
+- report: `diagnosis-02212e9683`
+- symptom: `Pending`
+- structured correlation: `relatedObjects=8`, `rootCauseCandidates=4`
+
 ## Release and Versioning
 
 - Current release: `v0.4.8`
