@@ -68,6 +68,9 @@ class KubernetesReadClient(Protocol):
     def get_node_conditions(self, node_name: str | None = None) -> dict:
         ...
 
+    def get_node_events(self, node_name: str) -> dict:
+        ...
+
     def get_node_workload_impact(self, node_name: str) -> dict:
         ...
 

@@ -277,6 +277,19 @@ class ToolRegistry:
                 handler=lambda args: self.client.get_node_conditions(**args),
             ),
             RegisteredTool(
+                name="get_node_events",
+                description="Get a bounded recent event summary for a node.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "node_name": {"type": "string"},
+                    },
+                    "required": ["node_name"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_node_events(**args),
+            ),
+            RegisteredTool(
                 name="get_node_workload_impact",
                 description="Summarize pods currently scheduled on a node to estimate workload blast radius.",
                 parameters={

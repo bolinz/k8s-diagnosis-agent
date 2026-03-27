@@ -559,6 +559,16 @@ class RuntimeKubernetesClient:
         nodes = self.core.list_node()
         return {"items": [_coerce_dict(item) for item in nodes.items]}
 
+    def get_node_events(self, node_name: str) -> dict:
+        try:
+            events = self.events.list_event_for_all_namespaces(
+                field_selector=f"involvedObject.kind=Node,involvedObject.name={node_name}",
+            )
+        except Exception as exc:
+            return _api_error(exc, "node_events", node_name=node_name)
+        items = [_event_summary(item) for item in events.items]
+        return {"items": items[:20], "window": "recent", "count": min(len(items), 20)}
+
     def get_node_workload_impact(self, node_name: str) -> dict:
         try:
             pods = self.core.list_pod_for_all_namespaces(

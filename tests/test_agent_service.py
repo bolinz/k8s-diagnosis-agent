@@ -201,6 +201,27 @@ class FakeKubernetesClient:
     def get_node_conditions(self, node_name=None):
         return {"items": []}
 
+    def get_node_events(self, node_name):
+        self.calls.append(("get_node_events", node_name))
+        if node_name == "missing-node":
+            return {"error": "node not found", "resource": "node_events", "node_name": node_name}
+        if node_name == "forbidden-node":
+            return {"error": "forbidden", "resource": "node_events", "node_name": node_name}
+        return {
+            "items": [
+                {
+                    "reason": "NodeNotReady",
+                    "message": "Node is not ready",
+                    "type": "Warning",
+                    "namespace": "default",
+                    "timestamp": "2026-03-22T05:00:00+00:00",
+                    "involvedObject": {"kind": "Node", "name": node_name},
+                }
+            ],
+            "window": "recent",
+            "count": 1,
+        }
+
     def get_node_workload_impact(self, node_name):
         self.calls.append(("get_node_workload_impact", node_name))
         return {
@@ -461,6 +482,30 @@ def test_tool_registry_get_namespace_events_success_not_found_forbidden():
     assert not_found_payload["resource"] == "namespace_events"
     assert "not found" in not_found_payload["error"]
     assert forbidden_payload["resource"] == "namespace_events"
+    assert forbidden_payload["error"] == "forbidden"
+
+
+def test_tool_registry_get_node_events_success_not_found_forbidden():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="NodeNotReadyImpact",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(client, trigger)
+
+    ok_payload = json.loads(registry.execute("get_node_events", {"node_name": "node-a"}))
+    not_found_payload = json.loads(registry.execute("get_node_events", {"node_name": "missing-node"}))
+    forbidden_payload = json.loads(registry.execute("get_node_events", {"node_name": "forbidden-node"}))
+
+    assert ok_payload["count"] == 1
+    assert ok_payload["items"][0]["reason"] == "NodeNotReady"
+    assert ok_payload["items"][0]["involvedObject"]["kind"] == "Node"
+    assert not_found_payload["resource"] == "node_events"
+    assert "not found" in not_found_payload["error"]
+    assert forbidden_payload["resource"] == "node_events"
     assert forbidden_payload["error"] == "forbidden"
 
 

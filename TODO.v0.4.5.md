@@ -25,10 +25,10 @@ Goal: broaden diagnosis coverage with controlled scope and no architecture chang
   - [x] Tool registry wiring
   - [x] Unit tests for success/not-found/forbidden
 
-- [ ] Tool: add `get_node_events(node_name)`
-  - [ ] Read-only bounded response (count + time window)
-  - [ ] Tool registry wiring
-  - [ ] Unit tests for success/not-found/forbidden
+- [x] Tool: add `get_node_events(node_name)`
+  - [x] Read-only bounded response (count + time window)
+  - [x] Tool registry wiring
+  - [x] Unit tests for success/not-found/forbidden
 
 - [ ] Report/API/UI: add `category` and `primarySignal`
   - [ ] Status/schema write path
