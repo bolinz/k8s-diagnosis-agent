@@ -4,7 +4,7 @@ metadata:
   name: k8s-diagnosis-agent-readonly
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "events", "nodes", "namespaces", "resourcequotas"]
+    resources: ["pods", "pods/log", "events", "nodes", "namespaces", "resourcequotas", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]

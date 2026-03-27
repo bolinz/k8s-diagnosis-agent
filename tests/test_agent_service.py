@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from agent.analyzers.rules import RuleEngine
 from agent.config.settings import Settings
 from agent.metrics import reset_metrics_for_tests, snapshot_metrics
-from agent.models import TriggerContext, WorkloadRef
+from agent.models import DiagnosisResult, TriggerContext, WorkloadRef
 from agent.orchestrator.codex_agent import CodexDiagnosisAgent
 from agent.reporting.diagnosis_reporter import DiagnosisReportFormatter
 from agent.service import AgentService, build_model_client, build_runtime_service
@@ -1320,6 +1320,94 @@ def test_service_fills_empty_diagnosis_fields_from_fallback():
     assert diagnosis.summary.startswith("Detected CrashLoopBackOff")
     assert diagnosis.evidence
     assert diagnosis.recommendations
+
+
+def test_service_merges_related_objects_with_correlation_context():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1200,
+        correlation_context={
+            "relatedObjects": [
+                {"kind": "Pod", "namespace": "payments", "name": "checkout-abc", "role": "primary"},
+                {"kind": "Deployment", "namespace": "payments", "name": "checkout", "role": "owner"},
+            ],
+            "rootCauseCandidates": [
+                {
+                    "objectRef": {"kind": "Deployment", "namespace": "payments", "name": "checkout"},
+                    "reason": "Deployment rollout blocked.",
+                    "confidence": 0.7,
+                }
+            ],
+            "evidenceTimeline": [],
+            "impactSummary": {},
+        },
+    )
+    diagnosis = DiagnosisResult(
+        summary="Pending due to PVC pressure",
+        severity="critical",
+        probable_causes=["PVC unavailable"],
+        evidence=["pod unschedulable"],
+        recommendations=["check pvc"],
+        confidence=0.8,
+        related_objects=[
+            {"kind": "PVC", "namespace": "payments", "name": "checkout-pvc", "role": "upstream-suspect"}
+        ],
+        root_cause_candidates=[],
+    )
+
+    completed = service._ensure_complete_diagnosis(trigger, diagnosis)
+
+    assert any(item["kind"] == "Pod" for item in completed.related_objects)
+    assert any(item["kind"] == "Deployment" for item in completed.related_objects)
+    assert any(item["kind"] == "PVC" for item in completed.related_objects)
+    assert completed.root_cause_candidates
+
+
+def test_service_builds_minimal_root_cause_candidate_when_empty():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1200,
+        correlation_context={
+            "relatedObjects": [
+                {"kind": "Pod", "namespace": "payments", "name": "checkout-abc", "role": "primary"},
+                {"kind": "PVC", "namespace": "payments", "name": "checkout-pvc", "role": "upstream-suspect"},
+            ],
+            "rootCauseCandidates": [],
+            "evidenceTimeline": [],
+            "impactSummary": {},
+        },
+    )
+    diagnosis = DiagnosisResult(
+        summary="Pending observed",
+        severity="critical",
+        probable_causes=["PVC not bound"],
+        evidence=["unschedulable"],
+        recommendations=["inspect pvc"],
+        confidence=0.6,
+        related_objects=[],
+        root_cause_candidates=[],
+    )
+
+    completed = service._ensure_complete_diagnosis(trigger, diagnosis)
+
+    assert completed.root_cause_candidates
+    assert completed.root_cause_candidates[0]["objectRef"]["kind"] == "PVC"
 
 
 def test_backfill_rewrites_incomplete_reports():

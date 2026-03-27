@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: e2e-unbound-pvc
+  namespace: diag-e2e
+  labels:
+    app.kubernetes.io/name: e2e-complex-failure
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: does-not-exist-sc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-checkout
+  namespace: diag-e2e
+  labels:
+    app.kubernetes.io/name: e2e-complex-failure
+spec:
+  replicas: 3
+  minReadySeconds: 5
+  progressDeadlineSeconds: 120
+  selector:
+    matchLabels:
+      app: e2e-checkout
+  template:
+    metadata:
+      labels:
+        app: e2e-checkout
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: app
+          image: nginx:1.27
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: e2e-missing-env-secret
+                optional: false
+          volumeMounts:
+            - name: missing-secret-vol
+              mountPath: /etc/e2e-secret
+              readOnly: true
+            - name: broken-pvc-vol
+              mountPath: /var/lib/e2e-data
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 2
+      volumes:
+        - name: missing-secret-vol
+          secret:
+            secretName: e2e-missing-volume-secret
+            optional: false
+        - name: broken-pvc-vol
+          persistentVolumeClaim:
+            claimName: e2e-unbound-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-config-break
+  namespace: diag-e2e
+  labels:
+    app.kubernetes.io/name: e2e-complex-failure
+spec:
+  replicas: 2
+  progressDeadlineSeconds: 120
+  selector:
+    matchLabels:
+      app: e2e-config-break
+  template:
+    metadata:
+      labels:
+        app: e2e-config-break
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: app
+          image: nginx:1.27
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: e2e-missing-config-secret
+                optional: false
+          volumeMounts:
+            - name: missing-config-volume
+              mountPath: /etc/e2e-config
+              readOnly: true
+      volumes:
+        - name: missing-config-volume
+          secret:
+            secretName: e2e-missing-config-volume-secret
+            optional: false
