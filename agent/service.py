@@ -104,14 +104,14 @@ class AgentService:
                 ),
                 "status": self.formatter.build_status(
                     diagnosis,
-                    self.settings.openai_model,
+                    self._active_model_name(),
                     raw_signal=trigger.raw_signal,
                 ),
             }
         return writer.upsert_report(
             trigger,
             diagnosis,
-            self.settings.openai_model,
+            self._active_model_name(),
             self.settings.diagnosis_name_prefix,
         )
 
@@ -184,7 +184,7 @@ class AgentService:
                 self.report_writer.upsert_report(
                     trigger,
                     diagnosis,
-                    self.settings.openai_model,
+                    self._active_model_name(),
                     self.settings.diagnosis_name_prefix,
                 )
             )
@@ -300,7 +300,7 @@ class AgentService:
         if not isinstance(model_info, dict):
             model_info = {}
         normalized["modelInfo"] = {
-            "name": model_info.get("name") or self.settings.openai_model,
+            "name": model_info.get("name") or self._active_model_name(),
             "fallback": bool(model_info.get("fallback", False)),
         }
         raw_signal = normalized.get("rawSignal")
@@ -323,6 +323,12 @@ class AgentService:
         impact = normalized.get("impactSummary", {})
         normalized["impactSummary"] = impact if isinstance(impact, dict) else {}
         return normalized
+
+    def _active_model_name(self) -> str:
+        model = getattr(self.codex_agent, "model", "")
+        if isinstance(model, str) and model:
+            return model
+        return self.settings.openai_model
 
     def _augment_trigger_signal(self, trigger: TriggerContext) -> TriggerContext:
         raw_signal = dict(trigger.raw_signal)

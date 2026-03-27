@@ -906,6 +906,53 @@ def test_service_normalizes_report_metadata_without_unknown_placeholders():
     assert report["rawSignal"]["reason"] == "BackOff"
 
 
+def test_service_normalizes_report_model_name_for_ollama_provider():
+    class SparseClient(FakeKubernetesClient):
+        def list_reports(self):
+            return [
+                {
+                    "metadata": {"name": "diagnosis-ollama"},
+                    "spec": {
+                        "source": "event",
+                        "cluster": "prod",
+                        "namespace": "payments",
+                        "symptom": "ImagePullBackOff",
+                        "observedFor": 1200,
+                        "triggerAt": "2026-03-22T05:00:00+00:00",
+                        "workloadRef": {"kind": "Pod", "name": "checkout-abc"},
+                    },
+                    "status": {
+                        "severity": "critical",
+                        "summary": "ImagePullBackOff detected",
+                        "probableCauses": ["image pull failed"],
+                        "evidence": ["reason=ImagePullBackOff"],
+                        "recommendations": ["check imagePullSecrets"],
+                        "confidence": 0.6,
+                        "analysisVersion": "0.4.3",
+                        "modelInfo": {},
+                    },
+                }
+            ]
+
+    settings = build_settings()
+    settings.model_provider = "ollama"
+    settings.ollama_model = "qwen3:8b"
+    service = AgentService(
+        settings=settings,
+        client=SparseClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient([]),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="qwen3:8b",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+    )
+
+    report = service.list_reports()[0]
+    assert report["modelInfo"]["name"] == "qwen3:8b"
+
+
 def test_process_trigger_normalizes_event_metadata_before_writing():
     service = AgentService(
         settings=build_settings(),

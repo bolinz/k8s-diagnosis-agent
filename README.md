@@ -2,7 +2,7 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Current release: `v0.4.3`
+Current release: `v0.4.4`
 
 ## Features
 
@@ -131,9 +131,9 @@ kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
 
 ## Release and Versioning
 
-- Current release: `v0.4.3`
-- Python package version: `0.4.3`
-- Helm chart version: `0.4.3`
+- Current release: `v0.4.4`
+- Python package version: `0.4.4`
+- Helm chart version: `0.4.4`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
 
 The current CI workflow:
@@ -143,7 +143,7 @@ The current CI workflow:
 - uses shell `docker` commands for image build and push
 - does not auto-create GitHub Releases yet
 
-`v0.4.3` adds provider abstraction, Ollama support, structured runtime logging, provider-accurate runtime model selection, DEBUG log boundary fixes, and a patch to serialize Kubernetes datetime values in tool outputs:
+`v0.4.4` adds provider abstraction, Ollama support, structured runtime logging, provider-accurate runtime model selection, DEBUG log boundary fixes, tool output datetime serialization, and a patch to persist `modelInfo.name` from the active provider model:
 
 - switch between `openai` and `ollama` with explicit `MODEL_PROVIDER`
 - support tool-calling diagnosis through an Ollama client adapter
