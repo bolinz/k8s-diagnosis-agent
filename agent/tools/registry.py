@@ -107,6 +107,19 @@ class ToolRegistry:
                 handler=lambda args: self.client.get_related_events(**args),
             ),
             RegisteredTool(
+                name="get_namespace_events",
+                description="Get a bounded recent event summary for a namespace.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                    },
+                    "required": ["namespace"],
+                    "additionalProperties": False,
+                },
+                handler=lambda args: self.client.get_namespace_events(**args),
+            ),
+            RegisteredTool(
                 name="list_related_pods",
                 description="List pods related to the target workload.",
                 parameters=workload_defaults,

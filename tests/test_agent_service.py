@@ -69,6 +69,26 @@ class FakeKubernetesClient:
             ]
         }
 
+    def get_namespace_events(self, namespace):
+        self.calls.append(("get_namespace_events", namespace))
+        if namespace == "missing":
+            return {"error": "namespace not found", "resource": "namespace_events", "namespace": namespace}
+        if namespace == "forbidden":
+            return {"error": "forbidden", "resource": "namespace_events", "namespace": namespace}
+        return {
+            "items": [
+                {
+                    "reason": "BackOff",
+                    "message": "Back-off restarting failed container",
+                    "type": "Warning",
+                    "namespace": namespace,
+                    "timestamp": "2026-03-22T05:00:00+00:00",
+                }
+            ],
+            "window": "recent",
+            "count": 1,
+        }
+
     def list_related_pods(self, namespace, kind, name):
         self.calls.append(("list_related_pods", namespace, kind, name))
         return {"items": [{"metadata": {"name": "checkout-abc"}}, {"metadata": {"name": "checkout-def"}}]}
@@ -419,6 +439,29 @@ def test_tool_registry_exposes_new_read_only_tools_without_secret_values():
     assert pvc_status["items"][0]["phase"] == "Pending"
     assert owner_chain["items"][-1]["kind"] == "Deployment"
     assert node_impact["podCount"] == 2
+
+
+def test_tool_registry_get_namespace_events_success_not_found_forbidden():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(client, trigger)
+
+    ok_payload = json.loads(registry.execute("get_namespace_events", {"namespace": "payments"}))
+    not_found_payload = json.loads(registry.execute("get_namespace_events", {"namespace": "missing"}))
+    forbidden_payload = json.loads(registry.execute("get_namespace_events", {"namespace": "forbidden"}))
+
+    assert ok_payload["count"] == 1
+    assert ok_payload["items"][0]["reason"] == "BackOff"
+    assert not_found_payload["resource"] == "namespace_events"
+    assert "not found" in not_found_payload["error"]
+    assert forbidden_payload["resource"] == "namespace_events"
+    assert forbidden_payload["error"] == "forbidden"
 
 
 def test_tool_registry_serializes_datetime_values():

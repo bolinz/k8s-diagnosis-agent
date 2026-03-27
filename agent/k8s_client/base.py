@@ -21,6 +21,9 @@ class KubernetesReadClient(Protocol):
     def get_related_events(self, namespace: str, kind: str, name: str) -> dict:
         ...
 
+    def get_namespace_events(self, namespace: str) -> dict:
+        ...
+
     def list_related_pods(self, namespace: str, kind: str, name: str) -> dict:
         ...
 
