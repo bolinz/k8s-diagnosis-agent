@@ -1,0 +1,89 @@
+name: v0.4.5 Work Item
+description: Track one scoped task for the v0.4.5 weekly milestone.
+title: "[v0.4.5] "
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Pick the primary scope area.
+      options:
+        - scheduling
+        - storage
+        - image
+        - tools
+        - ui-api
+        - metrics
+        - release
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0
+        - P1
+        - P2
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What gap does this work item close?
+      placeholder: Describe the concrete operator pain or diagnostic blind spot.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: List exact deliverables and out-of-scope constraints.
+      placeholder: |
+        Deliverables:
+        - ...
+        Out of scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Define objective completion checks.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test Plan
+      description: Include unit, integration, and cluster checks.
+      placeholder: |
+        Unit:
+        - ...
+        Integration:
+        - ...
+        Cluster:
+        - ...
+    validations:
+      required: true
+
+  - type: input
+    id: target_pr
+    attributes:
+      label: Target PR
+      description: Fill when implementation starts.
+      placeholder: "https://github.com/bolinz/k8s-diagnosis-agent/pull/..."
+    validations:
+      required: false
