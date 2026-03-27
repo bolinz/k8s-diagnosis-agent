@@ -6,6 +6,7 @@ from time import perf_counter
 import logging
 from typing import Any
 
+from agent.analyzers.attribution import score_root_cause_candidates
 from agent.analyzers.rules import RuleEngine
 from agent.config.settings import Settings
 from agent.k8s_client.base import KubernetesReadClient
@@ -893,25 +894,7 @@ class AgentService:
         symptom: str,
         items: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        preferred = {
-            "FailedMount": ["PVC", "Pod", "Node"],
-            "ProgressDeadlineExceeded": ["Deployment", "ReplicaSet", "Pod"],
-            "ReplicaMismatch": ["Deployment", "ReplicaSet", "Pod"],
-            "ImagePullBackOff": ["Deployment", "ReplicaSet", "Pod", "Node"],
-            "ErrImagePull": ["Deployment", "ReplicaSet", "Pod", "Node"],
-            "CreateContainerConfigError": ["Deployment", "ReplicaSet", "Pod", "Node"],
-            "ContainerCannotRun": ["Deployment", "ReplicaSet", "Pod", "Node"],
-        }.get(symptom, [])
-
-        def rank(item: dict[str, Any]) -> tuple[int, float]:
-            kind = item.get("objectRef", {}).get("kind", "")
-            try:
-                index = preferred.index(kind)
-            except ValueError:
-                index = len(preferred)
-            return (index, -float(item.get("confidence", 0.0)))
-
-        return sorted(items, key=rank)
+        return score_root_cause_candidates(symptom=symptom, items=items)
 
 
 def build_runtime_service(settings: Settings) -> AgentService:
