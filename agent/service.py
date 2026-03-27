@@ -924,6 +924,7 @@ def build_runtime_service(settings: Settings) -> AgentService:
         model=responses_client.model,
         max_tool_calls=settings.max_tool_calls,
         max_input_bytes=settings.max_input_bytes,
+        max_diagnosis_seconds=settings.max_diagnosis_seconds,
     )
     writer = KubernetesDiagnosisReportWriter(
         report_namespace=settings.report_namespace,

@@ -23,6 +23,7 @@ class Settings:
     min_observation_seconds: int
     webhook_port: int
     max_tool_calls: int
+    max_diagnosis_seconds: int
     max_input_bytes: int
     request_timeout_seconds: int
     api_base_url: str
@@ -51,6 +52,7 @@ class Settings:
             ),
             webhook_port=_int_env("K8S_DIAGNOSIS_WEBHOOK_PORT", 8080),
             max_tool_calls=_int_env("K8S_DIAGNOSIS_MAX_TOOL_CALLS", 8),
+            max_diagnosis_seconds=_int_env("K8S_DIAGNOSIS_MAX_DIAGNOSIS_SECONDS", 45),
             max_input_bytes=_int_env("K8S_DIAGNOSIS_MAX_INPUT_BYTES", 20000),
             request_timeout_seconds=_int_env(
                 "K8S_DIAGNOSIS_REQUEST_TIMEOUT_SECONDS", 45

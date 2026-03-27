@@ -101,6 +101,7 @@ Environment variables:
 - `K8S_DIAGNOSIS_SCAN_INTERVAL_SECONDS`: scheduler interval, default `300`
 - `K8S_DIAGNOSIS_MIN_OBSERVATION_SECONDS`: scan threshold, default `600`
 - `K8S_DIAGNOSIS_MAX_TOOL_CALLS`: max model tool invocations, default `8`
+- `K8S_DIAGNOSIS_MAX_DIAGNOSIS_SECONDS`: max autonomous diagnosis loop duration, default `45`
 - `K8S_DIAGNOSIS_MAX_INPUT_BYTES`: max serialized tool output size, default `20000`
 - `K8S_DIAGNOSIS_WEBHOOK_PORT`: API/UI port, default `8080`
 - `K8S_DIAGNOSIS_EVENT_DEDUPE_WINDOW_SECONDS`: event dedupe window, default `300`
@@ -128,6 +129,7 @@ kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
 - No automatic remediation or write-back to application manifests
 - No persistent database; UI reads directly from `DiagnosisReport` objects
 - Without `OPENAI_API_KEY`, all diagnoses use deterministic fallback output
+- Tool calls are scope-guarded to the trigger namespace for namespaced APIs
 
 ## Release and Versioning
 

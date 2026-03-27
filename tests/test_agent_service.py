@@ -330,6 +330,7 @@ def build_settings() -> Settings:
         min_observation_seconds=600,
         webhook_port=8080,
         max_tool_calls=8,
+        max_diagnosis_seconds=45,
         max_input_bytes=20000,
         request_timeout_seconds=30,
         api_base_url="https://api.openai.com/v1",
@@ -553,10 +554,31 @@ def test_tool_registry_get_namespace_events_success_not_found_forbidden():
 
     assert ok_payload["count"] == 1
     assert ok_payload["items"][0]["reason"] == "BackOff"
-    assert not_found_payload["resource"] == "namespace_events"
-    assert "not found" in not_found_payload["error"]
-    assert forbidden_payload["resource"] == "namespace_events"
-    assert forbidden_payload["error"] == "forbidden"
+    assert not_found_payload["resource"] == "tool_guard"
+    assert not_found_payload["allowedNamespace"] == "payments"
+    assert forbidden_payload["resource"] == "tool_guard"
+    assert forbidden_payload["allowedNamespace"] == "payments"
+
+
+def test_tool_registry_blocks_cross_namespace_access():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(client, trigger)
+    payload = json.loads(
+        registry.execute(
+            "get_pod_events",
+            {"namespace": "kube-system", "pod_name": "coredns-abc"},
+        )
+    )
+    assert payload["resource"] == "tool_guard"
+    assert payload["tool"] == "get_pod_events"
+    assert payload["allowedNamespace"] == "payments"
 
 
 def test_tool_registry_get_node_events_success_not_found_forbidden():
@@ -710,6 +732,44 @@ def test_codex_agent_falls_back_when_model_output_is_invalid():
         model="gpt-5-codex",
         max_tool_calls=8,
         max_input_bytes=20000,
+    )
+    diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
+    assert diagnosis.used_fallback is True
+    assert diagnosis.severity == "critical"
+
+
+def test_codex_agent_falls_back_when_diagnosis_time_budget_exceeded():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="ImagePullBackOff",
+        observed_for_seconds=1800,
+    )
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {
+                            "summary": "will never be used",
+                            "severity": "critical",
+                            "probableCauses": ["x"],
+                            "evidence": ["y"],
+                            "recommendations": ["z"],
+                            "confidence": 0.8,
+                        }
+                    )
+                }
+            ]
+        ),
+        rule_engine=engine,
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+        max_diagnosis_seconds=0,
     )
     diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
     assert diagnosis.used_fallback is True

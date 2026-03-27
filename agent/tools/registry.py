@@ -57,8 +57,25 @@ class ToolRegistry:
     def execute(self, name: str, arguments: JSON) -> str:
         if name not in self._tools:
             return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=True)
+        guard_error = self._guard_arguments(name, arguments)
+        if guard_error:
+            return json.dumps(guard_error, ensure_ascii=True, sort_keys=True)
         result = self._tools[name].handler(arguments)
         return json.dumps(_json_friendly(result), ensure_ascii=True, sort_keys=True)
+
+    def _guard_arguments(self, name: str, arguments: JSON) -> JSON | None:
+        namespace = arguments.get("namespace")
+        if namespace and name not in {"search_similar_reports"}:
+            allowed = self.trigger.workload.namespace
+            if allowed and namespace != allowed:
+                return {
+                    "error": "namespace out of allowed scope",
+                    "resource": "tool_guard",
+                    "tool": name,
+                    "namespace": namespace,
+                    "allowedNamespace": allowed,
+                }
+        return None
 
     def _build_tools(self) -> list[RegisteredTool]:
         workload_defaults = {

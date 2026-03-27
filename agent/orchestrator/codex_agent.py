@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from agent.analyzers.rules import RuleEngine
@@ -57,6 +58,7 @@ class CodexDiagnosisAgent:
     model: str
     max_tool_calls: int
     max_input_bytes: int
+    max_diagnosis_seconds: int = 45
     tool_history: list[ToolCallRecord] = field(default_factory=list)
 
     def diagnose(
@@ -93,8 +95,20 @@ class CodexDiagnosisAgent:
             },
         ]
 
+        started_at = perf_counter()
         tool_calls = 0
         while True:
+            if perf_counter() - started_at >= self.max_diagnosis_seconds:
+                log_event(
+                    LOGGER,
+                    logging.WARNING,
+                    "fallback_selected",
+                    "using fallback diagnosis because diagnosis time budget was exceeded",
+                    provider=getattr(self.responses_client, "provider_name", ""),
+                    model=self.model,
+                    max_diagnosis_seconds=self.max_diagnosis_seconds,
+                )
+                return self.rule_engine.fallback_diagnosis(trigger)
             log_event(
                 LOGGER,
                 logging.INFO,
@@ -140,6 +154,17 @@ class CodexDiagnosisAgent:
                 }
             )
             for call in function_calls:
+                if perf_counter() - started_at >= self.max_diagnosis_seconds:
+                    log_event(
+                        LOGGER,
+                        logging.WARNING,
+                        "fallback_selected",
+                        "using fallback diagnosis because diagnosis time budget was exceeded",
+                        provider=getattr(self.responses_client, "provider_name", ""),
+                        model=self.model,
+                        max_diagnosis_seconds=self.max_diagnosis_seconds,
+                    )
+                    return self.rule_engine.fallback_diagnosis(trigger)
                 if tool_calls >= self.max_tool_calls:
                     log_event(
                         LOGGER,
