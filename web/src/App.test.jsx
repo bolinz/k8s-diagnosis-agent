@@ -255,7 +255,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Pod/checkout-a" })).toBeInTheDocument();
     });
-    fireEvent.keyDown(window, { key: "j" });
+    fireEvent.keyDown(window, { key: "ArrowDown" });
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Pod/checkout-b" })).toBeInTheDocument();
     });
