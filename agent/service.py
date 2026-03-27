@@ -214,7 +214,12 @@ class AgentService:
         aggregated_trigger = self._attach_correlation_context(aggregated_trigger)
         diagnosis = self._ensure_complete_diagnosis(
             aggregated_trigger,
-            self.codex_agent.rule_engine.fallback_diagnosis(aggregated_trigger),
+            self.codex_agent.fallback_diagnosis(
+                aggregated_trigger,
+                reason="event_storm_aggregated",
+                storm_count=int(state.get("count", 0)),
+                storm_window_seconds=window_seconds,
+            ),
         )
         return self._persist_report(aggregated_trigger, diagnosis)
 

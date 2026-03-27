@@ -299,10 +299,10 @@ class DiagnosisAgent:
         try:
             payload = json.loads(text)
         except json.JSONDecodeError:
-            return self._fallback_with_trace(
-                trigger=trigger,
-                trace=trace,
-                reason="invalid_model_json",
+                return self._fallback_with_trace(
+                    trigger=trigger,
+                    trace=trace,
+                    reason="invalid_model_json",
                 provider=getattr(self.responses_client, "provider_name", ""),
                 model=self.model,
                 response_text=truncate_text(text, 400),
@@ -330,6 +330,20 @@ class DiagnosisAgent:
         )
         self._attach_trace(result, trace, fallback_reason="")
         return result
+
+    def fallback_diagnosis(
+        self,
+        trigger: TriggerContext,
+        reason: str,
+        **payload: Any,
+    ) -> DiagnosisResult:
+        trace = self._new_trace(trigger)
+        return self._fallback_with_trace(
+            trigger=trigger,
+            trace=trace,
+            reason=reason,
+            **payload,
+        )
 
     def _extract_output_text(self, response: dict[str, Any]) -> str:
         if isinstance(response.get("output_text"), str):

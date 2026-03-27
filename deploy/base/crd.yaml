@@ -135,6 +135,9 @@ spec:
                 modelInfo:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+                diagnosisTrace:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
                 rawSignal:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true

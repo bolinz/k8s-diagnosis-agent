@@ -1175,6 +1175,8 @@ def test_event_storm_threshold_emits_single_aggregated_report():
     assert third["status"]["rawSignal"]["aggregated"] is True
     assert third["status"]["rawSignal"]["stormCount"] == 3
     assert third["status"]["modelInfo"]["fallback"] is True
+    assert third["status"]["modelInfo"]["traceId"]
+    assert third["status"]["diagnosisTrace"]["fallbackReason"] == "event_storm_aggregated"
     assert fourth is None
 
 
