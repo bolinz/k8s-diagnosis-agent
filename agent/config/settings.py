@@ -43,6 +43,7 @@ class Settings:
     ollama_base_url: str
     diagnosis_name_prefix: str
     event_dedupe_window_seconds: int
+    event_storm_threshold: int
     scope_mode: str
     scope_allowed_namespaces: tuple[str, ...]
     workload_name: str
@@ -80,6 +81,7 @@ class Settings:
             event_dedupe_window_seconds=_int_env(
                 "K8S_DIAGNOSIS_EVENT_DEDUPE_WINDOW_SECONDS", 300
             ),
+            event_storm_threshold=_int_env("K8S_DIAGNOSIS_EVENT_STORM_THRESHOLD", 5),
             scope_mode=_scope_mode_env("K8S_DIAGNOSIS_SCOPE_MODE", "strict"),
             scope_allowed_namespaces=_csv_env("K8S_DIAGNOSIS_SCOPE_ALLOWLIST"),
             workload_name=os.getenv("K8S_DIAGNOSIS_WORKLOAD_NAME", "k8s-diagnosis-agent"),

@@ -337,6 +337,7 @@ def build_settings() -> Settings:
         ollama_base_url="http://127.0.0.1:11434",
         diagnosis_name_prefix="diagnosis",
         event_dedupe_window_seconds=300,
+        event_storm_threshold=5,
         scope_mode="strict",
         scope_allowed_namespaces=(),
         workload_name="k8s-diagnosis-agent",
@@ -370,9 +371,11 @@ def test_build_model_client_selects_openai_and_ollama():
 def test_settings_scope_mode_and_allowlist_from_env(monkeypatch):
     monkeypatch.setenv("K8S_DIAGNOSIS_SCOPE_MODE", "relaxed")
     monkeypatch.setenv("K8S_DIAGNOSIS_SCOPE_ALLOWLIST", "kube-system,monitoring")
+    monkeypatch.setenv("K8S_DIAGNOSIS_EVENT_STORM_THRESHOLD", "7")
     settings = Settings.from_env()
     assert settings.scope_mode == "relaxed"
     assert settings.scope_allowed_namespaces == ("kube-system", "monitoring")
+    assert settings.event_storm_threshold == 7
 
 
 def test_settings_invalid_scope_mode_falls_back_to_strict(monkeypatch):
@@ -1098,6 +1101,54 @@ def test_event_mapping_and_dedupe():
     second = service.process_event_trigger(trigger)
     assert first is not None
     assert second is None
+
+
+def test_event_storm_threshold_emits_single_aggregated_report():
+    trigger = TriggerContext(
+        source="event",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="CrashLoopBackOff",
+        observed_for_seconds=0,
+        raw_signal={"reason": "BackOff", "message": "Back-off restarting failed container"},
+    )
+    client = FakeKubernetesClient()
+    settings = build_settings()
+    settings.event_storm_threshold = 3
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {
+                            "summary": "Pod is repeatedly restarting.",
+                            "severity": "warning",
+                            "probableCauses": ["Repeated crash loop detected."],
+                            "evidence": ["Warning event BackOff observed."],
+                            "recommendations": ["Inspect container logs."],
+                            "confidence": 0.7,
+                        }
+                    )
+                }
+            ]
+        ),
+        rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    service = AgentService(settings=settings, client=client, codex_agent=agent)
+    first = service.process_event_trigger(trigger)
+    second = service.process_event_trigger(trigger)
+    third = service.process_event_trigger(trigger)
+    fourth = service.process_event_trigger(trigger)
+    assert first is not None
+    assert second is None
+    assert third is not None
+    assert third["status"]["rawSignal"]["aggregated"] is True
+    assert third["status"]["rawSignal"]["stormCount"] == 3
+    assert third["status"]["modelInfo"]["fallback"] is True
+    assert fourth is None
 
 
 def test_event_mapping_skips_events_without_object_name():

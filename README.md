@@ -107,6 +107,7 @@ Environment variables:
 - `K8S_DIAGNOSIS_MAX_INPUT_BYTES`: max serialized tool output size, default `20000`
 - `K8S_DIAGNOSIS_WEBHOOK_PORT`: API/UI port, default `8080`
 - `K8S_DIAGNOSIS_EVENT_DEDUPE_WINDOW_SECONDS`: event dedupe window, default `300`
+- `K8S_DIAGNOSIS_EVENT_STORM_THRESHOLD`: repeated event count threshold that emits one aggregated fallback report, default `5`
 
 Secrets and image pull notes:
 

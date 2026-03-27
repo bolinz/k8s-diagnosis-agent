@@ -34,6 +34,7 @@ class AgentService:
     report_writer: object | None = None
     formatter: DiagnosisReportFormatter = field(default_factory=DiagnosisReportFormatter)
     recent_events: dict[str, datetime] = field(default_factory=dict)
+    recent_event_storms: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def scan_once(self) -> list[dict]:
         log_event(LOGGER, logging.INFO, "scan_start", "scheduled scan started")
@@ -104,11 +105,125 @@ class AgentService:
         )
         if diagnosis.used_fallback:
             inc_counter("diagnosis_fallback_total")
+        result = self._persist_report(trigger, diagnosis)
+        observe_diagnosis_duration(perf_counter() - start)
+        return result
+
+    def process_event_trigger(self, trigger: TriggerContext) -> dict | None:
+        key = ":".join(
+            [
+                trigger.workload.namespace,
+                trigger.workload.kind,
+                trigger.workload.name,
+                trigger.symptom,
+            ]
+        )
+        now = datetime.now(timezone.utc)
+        state = self._next_event_storm_state(key, now)
+        count = int(state.get("count", 0))
+        threshold = max(2, self.settings.event_storm_threshold)
+        if count == 1:
+            self.recent_events[key] = now
+            return self.process_trigger(trigger)
+        if count < threshold:
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "event_deduped",
+                "skipping duplicate event trigger",
+                namespace=trigger.workload.namespace,
+                workload_kind=trigger.workload.kind,
+                workload_name=trigger.workload.name,
+                symptom=trigger.symptom,
+                burst_count=count,
+                burst_threshold=threshold,
+            )
+            return None
+        if not state.get("aggregated", False):
+            state["aggregated"] = True
+            log_event(
+                LOGGER,
+                logging.WARNING,
+                "event_storm_aggregated",
+                "aggregating event storm into one fallback report",
+                namespace=trigger.workload.namespace,
+                workload_kind=trigger.workload.kind,
+                workload_name=trigger.workload.name,
+                symptom=trigger.symptom,
+                burst_count=count,
+                burst_threshold=threshold,
+            )
+            return self._process_aggregated_event_trigger(trigger, state)
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "event_storm_suppressed",
+            "suppressing additional event storm triggers",
+            namespace=trigger.workload.namespace,
+            workload_kind=trigger.workload.kind,
+            workload_name=trigger.workload.name,
+            symptom=trigger.symptom,
+            burst_count=count,
+            burst_threshold=threshold,
+        )
+        return None
+
+    def _next_event_storm_state(self, key: str, now: datetime) -> dict[str, Any]:
+        window = max(1, self.settings.event_dedupe_window_seconds)
+        state = self.recent_event_storms.get(key)
+        if state is None:
+            state = {"first_seen": now, "last_seen": now, "count": 0, "aggregated": False}
+        else:
+            first_seen = state.get("first_seen")
+            if not isinstance(first_seen, datetime) or (now - first_seen).total_seconds() >= window:
+                state = {"first_seen": now, "last_seen": now, "count": 0, "aggregated": False}
+            else:
+                state["last_seen"] = now
+        state["count"] = int(state.get("count", 0)) + 1
+        state["last_seen"] = now
+        self.recent_event_storms[key] = state
+        return state
+
+    def _process_aggregated_event_trigger(self, trigger: TriggerContext, state: dict[str, Any]) -> dict:
+        first_seen = state.get("first_seen")
+        last_seen = state.get("last_seen")
+        if isinstance(first_seen, datetime) and isinstance(last_seen, datetime):
+            window_seconds = max(1, int((last_seen - first_seen).total_seconds()))
+        else:
+            window_seconds = max(1, self.settings.event_dedupe_window_seconds)
+        aggregated_raw_signal = dict(trigger.raw_signal or {})
+        aggregated_raw_signal.update(
+            {
+                "aggregated": True,
+                "stormCount": int(state.get("count", 0)),
+                "stormWindowSeconds": window_seconds,
+            }
+        )
+        aggregated_trigger = TriggerContext(
+            source=trigger.source,
+            cluster=trigger.cluster,
+            workload=trigger.workload,
+            symptom=trigger.symptom,
+            observed_for_seconds=max(trigger.observed_for_seconds, window_seconds),
+            trigger_at=trigger.trigger_at,
+            raw_signal=aggregated_raw_signal,
+            correlation_context=trigger.correlation_context,
+        )
+        aggregated_trigger = self._normalize_trigger(aggregated_trigger)
+        aggregated_trigger = self._augment_trigger_signal(aggregated_trigger)
+        aggregated_trigger = self._attach_correlation_context(aggregated_trigger)
+        diagnosis = self._ensure_complete_diagnosis(
+            aggregated_trigger,
+            self.codex_agent.rule_engine.fallback_diagnosis(aggregated_trigger),
+        )
+        return self._persist_report(aggregated_trigger, diagnosis)
+
+    def _persist_report(self, trigger: TriggerContext, diagnosis: DiagnosisResult) -> dict:
         category = self._category_for_symptom(trigger.symptom)
         primary_signal = self._derive_primary_signal(trigger.symptom, trigger.raw_signal)
         writer = self.report_writer
         if writer is None:
-            result = {
+            return {
                 **self.formatter.build_spec(
                     self.formatter.dedupe_name(
                         trigger, self.settings.diagnosis_name_prefix
@@ -124,9 +239,7 @@ class AgentService:
                     primary_signal=primary_signal,
                 ),
             }
-            observe_diagnosis_duration(perf_counter() - start)
-            return result
-        result = writer.upsert_report(
+        return writer.upsert_report(
             trigger,
             diagnosis,
             self._active_model_name(),
@@ -134,36 +247,6 @@ class AgentService:
             category=category,
             primary_signal=primary_signal,
         )
-        observe_diagnosis_duration(perf_counter() - start)
-        return result
-
-    def process_event_trigger(self, trigger: TriggerContext) -> dict | None:
-        key = ":".join(
-            [
-                trigger.workload.namespace,
-                trigger.workload.kind,
-                trigger.workload.name,
-                trigger.symptom,
-            ]
-        )
-        now = datetime.now(timezone.utc)
-        seen = self.recent_events.get(key)
-        if seen is not None:
-            delta = (now - seen).total_seconds()
-            if delta < self.settings.event_dedupe_window_seconds:
-                log_event(
-                    LOGGER,
-                    logging.INFO,
-                    "event_deduped",
-                    "skipping duplicate event trigger",
-                    namespace=trigger.workload.namespace,
-                    workload_kind=trigger.workload.kind,
-                    workload_name=trigger.workload.name,
-                    symptom=trigger.symptom,
-                )
-                return None
-        self.recent_events[key] = now
-        return self.process_trigger(trigger)
 
     def list_reports(self, params: dict | None = None) -> list[dict]:
         params = params or {}
