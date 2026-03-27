@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from time import perf_counter
 import logging
+import re
 from typing import Any
 
 from agent.analyzers.attribution import score_root_cause_candidates
@@ -431,6 +432,21 @@ class AgentService:
         summary = diagnosis.summary.strip() if diagnosis.summary else ""
         if not summary or summary == "Diagnosis incomplete":
             summary = self._fallback_summary(trigger)
+        related_objects = self._merge_related_objects(
+            correlation.get("relatedObjects", []),
+            diagnosis.related_objects,
+        )
+        root_candidates = self._merge_root_cause_candidates(
+            correlation.get("rootCauseCandidates", []),
+            diagnosis.root_cause_candidates,
+        )
+        if not root_candidates:
+            probable_causes = diagnosis.probable_causes or fallback.probable_causes
+            root_candidates = self._minimal_root_cause_candidates(
+                trigger,
+                related_objects,
+                probable_causes,
+            )
         return DiagnosisResult(
             summary=summary,
             severity=diagnosis.severity or fallback.severity,
@@ -438,9 +454,8 @@ class AgentService:
             evidence=diagnosis.evidence or self._fallback_evidence(trigger),
             recommendations=diagnosis.recommendations or fallback.recommendations,
             confidence=diagnosis.confidence if diagnosis.confidence > 0 else fallback.confidence,
-            related_objects=diagnosis.related_objects or correlation.get("relatedObjects", []),
-            root_cause_candidates=diagnosis.root_cause_candidates
-            or correlation.get("rootCauseCandidates", []),
+            related_objects=related_objects,
+            root_cause_candidates=root_candidates,
             evidence_timeline=diagnosis.evidence_timeline
             or correlation.get("evidenceTimeline", []),
             impact_summary=diagnosis.impact_summary or correlation.get("impactSummary", {}),
@@ -450,6 +465,130 @@ class AgentService:
             or not diagnosis.evidence
             or not diagnosis.recommendations,
         )
+
+    def _merge_related_objects(
+        self,
+        correlation_items: list[dict[str, Any]],
+        diagnosis_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        for item in list(correlation_items or []) + list(diagnosis_items or []):
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind", "")).strip()
+            name = str(item.get("name", "")).strip()
+            if not kind or not name:
+                continue
+            normalized = {
+                "kind": kind,
+                "namespace": str(item.get("namespace", "")).strip(),
+                "name": name,
+                "role": str(item.get("role", "")).strip() or "affected",
+            }
+            if normalized not in merged:
+                merged.append(normalized)
+        return merged
+
+    def _merge_root_cause_candidates(
+        self,
+        correlation_items: list[dict[str, Any]],
+        diagnosis_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        for item in list(correlation_items or []) + list(diagnosis_items or []):
+            if not isinstance(item, dict):
+                continue
+            ref = item.get("objectRef", {})
+            if not isinstance(ref, dict):
+                continue
+            kind = str(ref.get("kind", "")).strip()
+            name = str(ref.get("name", "")).strip()
+            reason = str(item.get("reason", "")).strip()
+            if not kind or not name or not reason:
+                continue
+            confidence = item.get("confidence", 0.6)
+            try:
+                confidence_value = float(confidence)
+            except (TypeError, ValueError):
+                confidence_value = 0.6
+            normalized = {
+                "objectRef": {
+                    "kind": kind,
+                    "namespace": str(ref.get("namespace", "")).strip(),
+                    "name": name,
+                },
+                "reason": reason,
+                "confidence": confidence_value,
+            }
+            if normalized not in merged:
+                merged.append(normalized)
+        return merged
+
+    def _minimal_root_cause_candidates(
+        self,
+        trigger: TriggerContext,
+        related_objects: list[dict[str, Any]],
+        probable_causes: list[str],
+    ) -> list[dict[str, Any]]:
+        likely_pvc = next(
+            (
+                item
+                for item in related_objects
+                if item.get("kind") == "PVC" and item.get("name")
+            ),
+            None,
+        )
+        if likely_pvc and trigger.symptom in {"Pending", "FailedMount"}:
+            pvc_name = likely_pvc.get("name", "")
+            return [
+                {
+                    "objectRef": {
+                        "kind": "PVC",
+                        "namespace": likely_pvc.get("namespace", trigger.workload.namespace),
+                        "name": pvc_name,
+                    },
+                    "reason": (
+                        f"PVC {pvc_name} appears related to scheduling/mount failure "
+                        f"for {trigger.workload.kind}/{trigger.workload.name}."
+                    ),
+                    "confidence": 0.72,
+                }
+            ]
+        upstream = next(
+            (
+                item
+                for item in related_objects
+                if item.get("role") in {"owner", "upstream-suspect"}
+                and item.get("kind")
+                and item.get("name")
+            ),
+            None,
+        )
+        if upstream:
+            cause_hint = probable_causes[0] if probable_causes else "upstream dependency appears unhealthy"
+            return [
+                {
+                    "objectRef": {
+                        "kind": upstream.get("kind", ""),
+                        "namespace": upstream.get("namespace", ""),
+                        "name": upstream.get("name", ""),
+                    },
+                    "reason": f"{cause_hint}. Related object {upstream.get('kind')}/{upstream.get('name')} is likely involved.",
+                    "confidence": 0.58,
+                }
+            ]
+        cause_hint = probable_causes[0] if probable_causes else "insufficient evidence from model output"
+        return [
+            {
+                "objectRef": {
+                    "kind": trigger.workload.kind,
+                    "namespace": trigger.workload.namespace,
+                    "name": trigger.workload.name,
+                },
+                "reason": f"{cause_hint}. Primary workload remains the best candidate.",
+                "confidence": 0.45,
+            }
+        ]
 
     def _normalize_report_spec(self, spec: dict[str, Any], raw_signal: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(spec)
@@ -828,6 +967,23 @@ class AgentService:
             name=trigger.workload.name,
         )
         self._append_timeline(evidence_timeline, events.get("items", []), trigger.workload)
+        for event in events.get("items", []) if isinstance(events, dict) else []:
+            reason = str(event.get("reason", "")).strip()
+            message = str(event.get("message", "")).strip()
+            if reason != "FailedScheduling":
+                continue
+            if "unbound immediate persistentvolumeclaims" not in message.lower():
+                continue
+            match = re.search(r'["\']([a-z0-9-]+)["\']', message, flags=re.IGNORECASE)
+            pvc_name = match.group(1) if match else "unknown-pvc"
+            self._append_root_candidate(
+                root_candidates,
+                "PVC",
+                trigger.workload.namespace,
+                pvc_name,
+                "Scheduling failed because at least one referenced PVC is unbound.",
+                0.68,
+            )
 
         spec = self.client.get_pod_spec_summary(
             namespace=trigger.workload.namespace,
