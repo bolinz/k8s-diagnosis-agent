@@ -1,8 +1,18 @@
 # Changelog
 
-## v0.5.0 (Unreleased)
+## v0.5.1 (Unreleased)
 
-Release type: UI/operability enhancement patch for the embedded workbench.
+Release type: patch release for frontend packaging and deployment consistency.
+
+### Fixed
+
+- Runtime image now always includes built `web` frontend assets, so cluster deployments render the Workbench UI instead of the fallback page.
+- Added Docker multi-stage frontend build during image creation and packaged frontend static files into `agent.ui`.
+- Added `.dockerignore` rules to prevent stale local `frontend_dist` from contaminating release images.
+
+## v0.5.0
+
+Release type: UI/operability enhancement release for the embedded workbench.
 
 ### Added
 
