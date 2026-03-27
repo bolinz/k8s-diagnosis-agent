@@ -2,7 +2,7 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Current release: `v0.4.6`
+Current release: `v0.4.7`
 
 ## Features
 
@@ -137,9 +137,9 @@ kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
 
 ## Release and Versioning
 
-- Current release: `v0.4.6`
-- Python package version: `0.4.6`
-- Helm chart version: `0.4.6`
+- Current release: `v0.4.7`
+- Python package version: `0.4.7`
+- Helm chart version: `0.4.7`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
 
 The current CI/release workflows:
@@ -148,6 +148,13 @@ The current CI/release workflows:
 - pushes container images on `main` and tag pushes
 - uses shell `docker` commands for image build and push
 - auto-creates GitHub Releases on `v*` tag pushes
+
+`v0.4.7` extends controlled autonomous probing and attribution clarity:
+
+- deterministic root-cause candidate scoring with ranking metadata
+- event-storm aggregation + suppression threshold
+- diagnosis trace metadata (`traceId`, tool sequence, fallback reason)
+- improved attribution readability in UI (`Top Root Candidate`, timeline emphasis)
 
 `v0.4.6` is a patch release focused on model output normalization correctness:
 
