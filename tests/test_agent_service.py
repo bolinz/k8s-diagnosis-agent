@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from agent.analyzers.rules import RuleEngine
 from agent.config.settings import Settings
+from agent.metrics import reset_metrics_for_tests, snapshot_metrics
 from agent.models import TriggerContext, WorkloadRef
 from agent.orchestrator.codex_agent import CodexDiagnosisAgent
 from agent.reporting.diagnosis_reporter import DiagnosisReportFormatter
@@ -361,6 +362,79 @@ def test_build_model_client_selects_openai_and_ollama():
     ollama_client = build_model_client(settings)
     assert ollama_client.provider_name == "ollama"
     assert ollama_client.model == "llama3.1"
+
+
+def test_metrics_increment_for_diagnosis_and_tool_calls():
+    reset_metrics_for_tests()
+    client = FakeKubernetesClient()
+    settings = build_settings()
+    engine = RuleEngine(cluster_name="prod", min_observation_seconds=600)
+    response = {
+        "output": [
+            {
+                "type": "function_call",
+                "name": "get_recent_logs",
+                "arguments": "{\"namespace\":\"payments\",\"pod_name\":\"checkout-abc\"}",
+                "call_id": "call_1",
+            }
+        ]
+    }
+    final = {
+        "output_text": json.dumps(
+            {
+                "summary": "Pod restarts because DATABASE_URL is missing.",
+                "severity": "critical",
+                "probableCauses": ["Missing DATABASE_URL."],
+                "evidence": ["Logs show missing DATABASE_URL."],
+                "recommendations": ["Restore secret wiring."],
+                "confidence": 0.9,
+            }
+        )
+    }
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient([response, final]),
+        rule_engine=engine,
+        model="gpt-5-codex",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    service = AgentService(settings=settings, client=client, codex_agent=agent)
+    service.process_alert(
+        {
+            "namespace": "payments",
+            "name": "checkout-abc",
+            "kind": "Pod",
+            "symptom": "CrashLoopBackOff",
+            "observed_for_seconds": 600,
+        }
+    )
+    metrics = snapshot_metrics()
+    assert metrics["diagnosis_requests_total"] >= 1
+    assert metrics["tool_calls_total"] >= 1
+    assert metrics["diagnosis_duration_seconds_count"] >= 1
+
+
+def test_metrics_increment_for_fallback_diagnosis():
+    reset_metrics_for_tests()
+    client = FakeKubernetesClient()
+    settings = build_settings()
+    service = AgentService(
+        settings=settings,
+        client=client,
+        codex_agent=build_fallback_agent(),
+    )
+    service.process_alert(
+        {
+            "namespace": "payments",
+            "name": "checkout-abc",
+            "kind": "Pod",
+            "symptom": "CrashLoopBackOff",
+            "observed_for_seconds": 600,
+        }
+    )
+    metrics = snapshot_metrics()
+    assert metrics["diagnosis_requests_total"] >= 1
+    assert metrics["diagnosis_fallback_total"] >= 1
 
 
 def test_build_model_client_rejects_invalid_provider():

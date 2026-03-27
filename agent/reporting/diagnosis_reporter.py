@@ -6,6 +6,7 @@ from hashlib import sha1
 from typing import Any
 import logging
 
+from agent.metrics import inc_counter
 from agent.models import DiagnosisResult, TriggerContext
 from agent.runtime_logging import get_logger, log_event
 
@@ -169,4 +170,5 @@ class KubernetesDiagnosisReportWriter:
             workload_name=trigger.workload.name,
             symptom=trigger.symptom,
         )
+        inc_counter("report_upsert_total")
         return result

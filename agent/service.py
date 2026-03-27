@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from time import perf_counter
 import logging
 from typing import Any
 
 from agent.analyzers.rules import RuleEngine
 from agent.config.settings import Settings
 from agent.k8s_client.base import KubernetesReadClient
+from agent.metrics import inc_counter, observe_diagnosis_duration
 from agent.models import DiagnosisResult, PendingFinding, TriggerContext, WorkloadRef
 from agent.orchestrator.codex_agent import CodexDiagnosisAgent
 from agent.orchestrator.responses_client import (
@@ -73,6 +75,8 @@ class AgentService:
         return self.process_trigger(trigger)
 
     def process_trigger(self, trigger: TriggerContext) -> dict:
+        start = perf_counter()
+        inc_counter("diagnosis_requests_total")
         trigger = self._normalize_trigger(trigger)
         trigger = self._augment_trigger_signal(trigger)
         trigger = self._attach_correlation_context(trigger)
@@ -92,11 +96,13 @@ class AgentService:
             trigger,
             self.codex_agent.diagnose(trigger, registry),
         )
+        if diagnosis.used_fallback:
+            inc_counter("diagnosis_fallback_total")
         category = self._category_for_symptom(trigger.symptom)
         primary_signal = self._derive_primary_signal(trigger.symptom, trigger.raw_signal)
         writer = self.report_writer
         if writer is None:
-            return {
+            result = {
                 **self.formatter.build_spec(
                     self.formatter.dedupe_name(
                         trigger, self.settings.diagnosis_name_prefix
@@ -112,7 +118,9 @@ class AgentService:
                     primary_signal=primary_signal,
                 ),
             }
-        return writer.upsert_report(
+            observe_diagnosis_duration(perf_counter() - start)
+            return result
+        result = writer.upsert_report(
             trigger,
             diagnosis,
             self._active_model_name(),
@@ -120,6 +128,8 @@ class AgentService:
             category=category,
             primary_signal=primary_signal,
         )
+        observe_diagnosis_duration(perf_counter() - start)
+        return result
 
     def process_event_trigger(self, trigger: TriggerContext) -> dict | None:
         key = ":".join(

@@ -36,12 +36,12 @@ Goal: broaden diagnosis coverage with controlled scope and no architecture chang
   - [x] UI filter by category
   - [x] UI detail block for primary signal
 
-- [ ] Observability: add minimal metrics
-  - [ ] `diagnosis_requests_total`
-  - [ ] `diagnosis_fallback_total`
-  - [ ] `diagnosis_duration_seconds`
-  - [ ] `tool_calls_total`
-  - [ ] `report_upsert_total`
+- [x] Observability: add minimal metrics
+  - [x] `diagnosis_requests_total`
+  - [x] `diagnosis_fallback_total`
+  - [x] `diagnosis_duration_seconds`
+  - [x] `tool_calls_total`
+  - [x] `report_upsert_total`
 
 - [ ] Release workflow: `v0.4.5`
   - [ ] Regression tests green
