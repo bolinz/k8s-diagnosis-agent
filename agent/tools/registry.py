@@ -44,9 +44,17 @@ class RegisteredTool:
 
 
 class ToolRegistry:
-    def __init__(self, client: KubernetesReadClient, trigger: TriggerContext) -> None:
+    def __init__(
+        self,
+        client: KubernetesReadClient,
+        trigger: TriggerContext,
+        scope_mode: str = "strict",
+        allowed_namespaces: set[str] | None = None,
+    ) -> None:
         self.client = client
         self.trigger = trigger
+        self.scope_mode = scope_mode if scope_mode in {"strict", "relaxed"} else "strict"
+        self.allowed_namespaces = set(allowed_namespaces or set())
         self._tools = {
             tool.name: tool for tool in self._build_tools()
         }
@@ -66,14 +74,27 @@ class ToolRegistry:
     def _guard_arguments(self, name: str, arguments: JSON) -> JSON | None:
         namespace = arguments.get("namespace")
         if namespace and name not in {"search_similar_reports"}:
-            allowed = self.trigger.workload.namespace
-            if allowed and namespace != allowed:
+            trigger_namespace = self.trigger.workload.namespace
+            if self.scope_mode == "relaxed":
+                allowed_set = {trigger_namespace, *self.allowed_namespaces} - {""}
+                if namespace not in allowed_set:
+                    return {
+                        "error": "namespace out of allowed scope",
+                        "resource": "tool_guard",
+                        "tool": name,
+                        "namespace": namespace,
+                        "scopeMode": self.scope_mode,
+                        "allowedNamespaces": sorted(allowed_set),
+                    }
+                return None
+            if trigger_namespace and namespace != trigger_namespace:
                 return {
                     "error": "namespace out of allowed scope",
                     "resource": "tool_guard",
                     "tool": name,
                     "namespace": namespace,
-                    "allowedNamespace": allowed,
+                    "scopeMode": self.scope_mode,
+                    "allowedNamespace": trigger_namespace,
                 }
         return None
 

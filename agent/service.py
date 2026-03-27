@@ -91,7 +91,12 @@ class AgentService:
             workload_name=trigger.workload.name,
             symptom=trigger.symptom,
         )
-        registry = ToolRegistry(self.client, trigger)
+        registry = ToolRegistry(
+            self.client,
+            trigger,
+            scope_mode=self.settings.scope_mode,
+            allowed_namespaces=set(self.settings.scope_allowed_namespaces),
+        )
         diagnosis = self._ensure_complete_diagnosis(
             trigger,
             self.codex_agent.diagnose(trigger, registry),

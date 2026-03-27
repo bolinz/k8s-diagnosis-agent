@@ -337,6 +337,8 @@ def build_settings() -> Settings:
         ollama_base_url="http://127.0.0.1:11434",
         diagnosis_name_prefix="diagnosis",
         event_dedupe_window_seconds=300,
+        scope_mode="strict",
+        scope_allowed_namespaces=(),
         workload_name="k8s-diagnosis-agent",
         log_level="INFO",
     )
@@ -363,6 +365,20 @@ def test_build_model_client_selects_openai_and_ollama():
     ollama_client = build_model_client(settings)
     assert ollama_client.provider_name == "ollama"
     assert ollama_client.model == "llama3.1"
+
+
+def test_settings_scope_mode_and_allowlist_from_env(monkeypatch):
+    monkeypatch.setenv("K8S_DIAGNOSIS_SCOPE_MODE", "relaxed")
+    monkeypatch.setenv("K8S_DIAGNOSIS_SCOPE_ALLOWLIST", "kube-system,monitoring")
+    settings = Settings.from_env()
+    assert settings.scope_mode == "relaxed"
+    assert settings.scope_allowed_namespaces == ("kube-system", "monitoring")
+
+
+def test_settings_invalid_scope_mode_falls_back_to_strict(monkeypatch):
+    monkeypatch.setenv("K8S_DIAGNOSIS_SCOPE_MODE", "invalid-mode")
+    settings = Settings.from_env()
+    assert settings.scope_mode == "strict"
 
 
 def test_metrics_increment_for_diagnosis_and_tool_calls():
@@ -579,6 +595,58 @@ def test_tool_registry_blocks_cross_namespace_access():
     assert payload["resource"] == "tool_guard"
     assert payload["tool"] == "get_pod_events"
     assert payload["allowedNamespace"] == "payments"
+    assert payload["scopeMode"] == "strict"
+
+
+def test_tool_registry_relaxed_scope_allows_explicit_allowlist_namespace():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(
+        client,
+        trigger,
+        scope_mode="relaxed",
+        allowed_namespaces={"kube-system"},
+    )
+    payload = json.loads(
+        registry.execute(
+            "get_pod_events",
+            {"namespace": "kube-system", "pod_name": "coredns-abc"},
+        )
+    )
+    assert "error" not in payload
+    assert payload["items"][0]["reason"] == "BackOff"
+
+
+def test_tool_registry_relaxed_scope_blocks_non_allowlisted_namespace():
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=1800,
+    )
+    registry = ToolRegistry(
+        client,
+        trigger,
+        scope_mode="relaxed",
+        allowed_namespaces={"kube-system"},
+    )
+    payload = json.loads(
+        registry.execute(
+            "get_pod_events",
+            {"namespace": "default", "pod_name": "nginx-abc"},
+        )
+    )
+    assert payload["resource"] == "tool_guard"
+    assert payload["scopeMode"] == "relaxed"
+    assert payload["allowedNamespaces"] == ["kube-system", "payments"]
 
 
 def test_tool_registry_get_node_events_success_not_found_forbidden():

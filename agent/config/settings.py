@@ -11,6 +11,19 @@ def _int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _csv_env(name: str) -> tuple[str, ...]:
+    value = os.getenv(name, "")
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return tuple(items)
+
+
+def _scope_mode_env(name: str, default: str) -> str:
+    value = os.getenv(name, default).strip().lower()
+    if value in {"strict", "relaxed"}:
+        return value
+    return default
+
+
 @dataclass
 class Settings:
     model_provider: str
@@ -30,6 +43,8 @@ class Settings:
     ollama_base_url: str
     diagnosis_name_prefix: str
     event_dedupe_window_seconds: int
+    scope_mode: str
+    scope_allowed_namespaces: tuple[str, ...]
     workload_name: str
     log_level: str
 
@@ -65,6 +80,8 @@ class Settings:
             event_dedupe_window_seconds=_int_env(
                 "K8S_DIAGNOSIS_EVENT_DEDUPE_WINDOW_SECONDS", 300
             ),
+            scope_mode=_scope_mode_env("K8S_DIAGNOSIS_SCOPE_MODE", "strict"),
+            scope_allowed_namespaces=_csv_env("K8S_DIAGNOSIS_SCOPE_ALLOWLIST"),
             workload_name=os.getenv("K8S_DIAGNOSIS_WORKLOAD_NAME", "k8s-diagnosis-agent"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
