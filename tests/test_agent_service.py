@@ -473,7 +473,7 @@ def test_process_alert_supports_workload_ref_payload_shape():
     report = service.process_alert(
         {
             "source": "manual-test",
-            "cluster": "admin@rtx2080",
+            "cluster": "test-cluster",
             "namespace": "kube-system",
             "workloadRef": {"kind": "Pod", "name": "coredns-6b4c956686-285zk"},
             "symptom": "ImagePullBackOff",
@@ -482,7 +482,7 @@ def test_process_alert_supports_workload_ref_payload_shape():
         }
     )
 
-    assert report["spec"]["cluster"] == "admin@rtx2080"
+    assert report["spec"]["cluster"] == "test-cluster"
     assert report["spec"]["namespace"] == "kube-system"
     assert report["spec"]["workloadRef"]["kind"] == "Pod"
     assert report["spec"]["workloadRef"]["name"] == "coredns-6b4c956686-285zk"

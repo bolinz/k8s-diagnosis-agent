@@ -20,7 +20,7 @@ Fault signals generated:
 ## Run
 
 ```bash
-cd /Users/zhangbolin/vibe-coding/k8s-diagnosis-agent
+cd k8s-diagnosis-agent
 chmod +x scripts/e2e/run_complex_failure.sh scripts/e2e/assert_complex_failure.py
 scripts/e2e/run_complex_failure.sh
 ```
@@ -66,7 +66,7 @@ kubectl delete ns diag-e2e
 
 ## Capability Proof (2026-03-27)
 
-Validated on cluster `admin@rtx2080` with image:
+Validated on cluster `<redacted-cluster>` with image:
 
 - `ghcr.io/bolinz/k8s-diagnosis-agent-app:sha-076127160ac72cffd95c94920214b1d87de1a086`
 

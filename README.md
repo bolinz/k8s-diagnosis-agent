@@ -119,7 +119,7 @@ Example Ollama runtime configuration:
 ```bash
 kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
   MODEL_PROVIDER=ollama \
-  OLLAMA_BASE_URL=http://192.168.100.182:11434 \
+  OLLAMA_BASE_URL=http://ollama.local:11434 \
   OLLAMA_MODEL=qwen3:8b \
   LOG_LEVEL=DEBUG \
   K8S_DIAGNOSIS_REQUEST_TIMEOUT_SECONDS=120
@@ -143,7 +143,7 @@ The project includes a reproducible complex-failure integration scenario:
 - injector: `deploy/e2e/complex-failure.yaml`
 - runner/assertion: `scripts/e2e/run_complex_failure.sh` + `scripts/e2e/assert_complex_failure.py`
 
-Latest validated run (2026-03-27) passed on cluster `admin@rtx2080`, producing:
+Latest validated run (2026-03-27) passed on cluster `<redacted-cluster>`, producing:
 
 - report: `diagnosis-02212e9683`
 - symptom: `Pending`
