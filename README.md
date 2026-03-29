@@ -2,9 +2,9 @@
 
 `k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
 
-Latest stable release: `v0.5.1`
+Latest stable release: `v0.5.2`
 
-Upcoming release preview: `v0.5.2` UX + AI analysis experience refresh ([details](./docs/releases/v0.5.2.md))
+Upcoming release preview: `v0.5.3` reliability patch for report integrity + CI/CD hardening ([details](./docs/releases/v0.5.3.md))
 
 ## Features
 
@@ -179,7 +179,7 @@ Latest validated run (2026-03-27) passed on cluster `<redacted-cluster>`, produc
 
 ## Release and Versioning
 
-- Latest stable release: `v0.5.1`
+- Latest stable release: `v0.5.2`
 - Python package version: `0.5.1`
 - Helm chart version: `0.5.1`
 - GitHub releases are source-first and reference GHCR images plus deployment docs
@@ -188,16 +188,17 @@ The current CI/release workflows:
 
 - runs backend and frontend tests (including Playwright e2e) on PRs and pushes
 - pushes container images on `main` and tag pushes
-- uses shell `docker` commands for image build and push
+- uses Buildx with GitHub Actions cache for image build and push
 - auto-creates GitHub Releases on `v*` tag pushes
 
-`v0.5.1` is a patch release focused on deployment consistency:
+`v0.5.3` (planned) focuses on reliability and delivery quality:
 
-- runtime image now bundles built Workbench frontend assets
-- frontend static files are packaged with `agent.ui` during wheel install
-- `.dockerignore` excludes local frontend build output to avoid stale assets
+- stricter report completeness normalization for sparse/legacy records
+- fallback-safe output guarantees for `summary/evidence/recommendations`
+- CI split for frontend unit/e2e with clearer failure boundaries
+- compile gate in backend CI and run cancellation for superseded branches
 
-Upcoming `v0.5.2` preview includes:
+`v0.5.2` is a patch release focused on UI density and analysis transparency:
 
 - compact top bar and compact status strip to increase detail viewport
 - wider detail workspace (`30/70`, large screen `24/76`) to reduce frequent scrolling
@@ -206,6 +207,12 @@ Upcoming `v0.5.2` preview includes:
 - timeline-switch blank-page fix for legacy reports
 
 See full walkthrough and screenshots: [docs/releases/v0.5.2.md](./docs/releases/v0.5.2.md)
+
+`v0.5.1` is a patch release focused on deployment consistency:
+
+- runtime image now bundles built Workbench frontend assets
+- frontend static files are packaged with `agent.ui` during wheel install
+- `.dockerignore` excludes local frontend build output to avoid stale assets
 
 `v0.5.0` introduced the major UI/operability updates including:
 
