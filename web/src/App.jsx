@@ -111,10 +111,15 @@ function formatAt(ts, timezone) {
   return d.toLocaleString(undefined, { timeZone: timezone, hour12: false });
 }
 
+function isPlaceholderValue(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text === "unknown" || text === "n/a" || text === "na" || text === "none" || text === "null";
+}
+
 function workloadLabel(item) {
   const kind = item?.workload?.kind;
   const name = item?.workload?.name;
-  if (kind && name) return `${kind}/${name}`;
+  if (kind && name && !isPlaceholderValue(kind) && !isPlaceholderValue(name)) return `${kind}/${name}`;
   return item?.name || item?.symptom || "DiagnosisReport";
 }
 
@@ -880,10 +885,26 @@ export default function App() {
     rawSignal.deploymentCondition ? `Deployment condition: ${rawSignal.deploymentCondition}` : "",
     rawSignal.pvcPhase ? `PVC phase: ${rawSignal.pvcPhase}` : "",
   ].filter(Boolean);
-  const modelInfo = selected?.modelInfo || {};
-  const modelName = String(modelInfo.name || modelInfo.model || "rule-fallback");
-  const providerName = String(modelInfo.provider || (modelName.includes("qwen") ? "ollama" : "openai"));
-  const fallbackUsed = Boolean(modelInfo.fallback);
+  const modelInfo = selected?.modelInfo && typeof selected.modelInfo === "object" ? selected.modelInfo : {};
+  const diagnosisTrace = selected?.diagnosisTrace && typeof selected.diagnosisTrace === "object" ? selected.diagnosisTrace : {};
+  const modelNameValue = String(modelInfo.name || modelInfo.model || "").trim();
+  const hasModelName = Boolean(modelNameValue) && !isPlaceholderValue(modelNameValue);
+  const traceToolCalls = Number(diagnosisTrace.toolCallsUsed || 0);
+  const hasTrace = Boolean(diagnosisTrace.traceId) || traceToolCalls > 0;
+  const hasFallbackFlag = Object.prototype.hasOwnProperty.call(modelInfo, "fallback");
+  const fallbackUsed = hasFallbackFlag ? Boolean(modelInfo.fallback) : false;
+  const aiSessionMode = fallbackUsed
+    ? "fallback"
+    : hasModelName && hasTrace
+      ? "model"
+      : "legacy";
+  const modelName = hasModelName ? modelNameValue : "-";
+  const providerName =
+    modelInfo.provider && !isPlaceholderValue(modelInfo.provider)
+      ? String(modelInfo.provider)
+      : aiSessionMode === "model"
+        ? (modelNameValue.toLowerCase().includes("qwen") ? "ollama" : "openai")
+        : "-";
   const confidenceValue = normalizeConfidence(selected?.confidence);
   const confidenceLabel = confidenceLevel(selected?.confidence);
   const recommendationLinks = useMemo(
@@ -1187,7 +1208,17 @@ export default function App() {
                   <h3>AI Analysis Session</h3>
                   <div className="ai-meta">
                     <span className={`ai-confidence ai-confidence-${confidenceLabel}`}>Confidence: {confidenceValue === null ? "unknown" : confidenceLabel}</span>
-                    <span className={`ai-fallback ${fallbackUsed ? "ai-fallback-yes" : "ai-fallback-no"}`}>{fallbackUsed ? "Fallback" : "Model Run"}</span>
+                    <span
+                      className={`ai-fallback ${
+                        aiSessionMode === "fallback"
+                          ? "ai-fallback-yes"
+                          : aiSessionMode === "model"
+                            ? "ai-fallback-no"
+                            : "ai-fallback-legacy"
+                      }`}
+                    >
+                      {aiSessionMode === "fallback" ? "Fallback" : aiSessionMode === "model" ? "Model Run" : "Legacy / Unknown"}
+                    </span>
                   </div>
                 </div>
                 <div className="ai-stage-row">

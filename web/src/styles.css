@@ -568,6 +568,12 @@ body {
   background: #fff7ed;
 }
 
+.ai-fallback-legacy {
+  color: #475569;
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
 .ai-stage-row {
   margin-top: 8px;
   display: flex;

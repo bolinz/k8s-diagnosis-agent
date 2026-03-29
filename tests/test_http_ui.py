@@ -102,5 +102,5 @@ def test_service_does_not_emit_unknown_or_na_placeholders():
     )
     item = service.list_reports()[0]
     assert item["workload"]["name"] == ""
-    assert item["modelInfo"]["name"] == "gpt-5-codex"
+    assert item["modelInfo"] == {}
     assert item["rawSignal"] == {}

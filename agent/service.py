@@ -432,27 +432,35 @@ class AgentService:
         summary = diagnosis.summary.strip() if diagnosis.summary else ""
         if not summary or summary == "Diagnosis incomplete":
             summary = self._fallback_summary(trigger)
-        related_objects = self._merge_related_objects(
+        related_objects = self._sanitize_related_objects(self._merge_related_objects(
             correlation.get("relatedObjects", []),
             diagnosis.related_objects,
-        )
-        root_candidates = self._merge_root_cause_candidates(
+        ))
+        root_candidates = self._sanitize_root_cause_candidates(
+            self._merge_root_cause_candidates(
             correlation.get("rootCauseCandidates", []),
             diagnosis.root_cause_candidates,
+            ),
+            related_objects,
+            trigger,
         )
+        probable_causes = diagnosis.probable_causes or fallback.probable_causes or self._fallback_probable_causes(trigger)
         if not root_candidates:
-            probable_causes = diagnosis.probable_causes or fallback.probable_causes
             root_candidates = self._minimal_root_cause_candidates(
                 trigger,
                 related_objects,
                 probable_causes,
             )
+        recommendations = diagnosis.recommendations or self._fallback_recommendations(
+            trigger,
+            fallback.recommendations,
+        )
         return DiagnosisResult(
             summary=summary,
             severity=diagnosis.severity or fallback.severity,
-            probable_causes=diagnosis.probable_causes or fallback.probable_causes,
+            probable_causes=probable_causes,
             evidence=diagnosis.evidence or self._fallback_evidence(trigger),
-            recommendations=diagnosis.recommendations or fallback.recommendations,
+            recommendations=recommendations,
             confidence=diagnosis.confidence if diagnosis.confidence > 0 else fallback.confidence,
             related_objects=related_objects,
             root_cause_candidates=root_candidates,
@@ -489,6 +497,27 @@ class AgentService:
                 merged.append(normalized)
         return merged
 
+    def _sanitize_related_objects(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        sanitized: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind", "")).strip()
+            name = str(item.get("name", "")).strip()
+            if not kind or not name:
+                continue
+            if self._is_placeholder_value(kind) or self._is_placeholder_value(name):
+                continue
+            normalized = {
+                "kind": kind,
+                "namespace": str(item.get("namespace", "")).strip(),
+                "name": name,
+                "role": str(item.get("role", "")).strip() or "affected",
+            }
+            if normalized not in sanitized:
+                sanitized.append(normalized)
+        return sanitized
+
     def _merge_root_cause_candidates(
         self,
         correlation_items: list[dict[str, Any]],
@@ -523,6 +552,57 @@ class AgentService:
             if normalized not in merged:
                 merged.append(normalized)
         return merged
+
+    def _sanitize_root_cause_candidates(
+        self,
+        items: list[dict[str, Any]],
+        related_objects: list[dict[str, Any]],
+        trigger: TriggerContext,
+    ) -> list[dict[str, Any]]:
+        allowed_refs = {
+            (
+                str(item.get("kind", "")).strip().lower(),
+                str(item.get("namespace", "")).strip().lower(),
+                str(item.get("name", "")).strip().lower(),
+            )
+            for item in related_objects
+            if isinstance(item, dict)
+        }
+        primary_ref = (
+            trigger.workload.kind.strip().lower(),
+            trigger.workload.namespace.strip().lower(),
+            trigger.workload.name.strip().lower(),
+        )
+        sanitized: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            ref = item.get("objectRef", {})
+            if not isinstance(ref, dict):
+                continue
+            kind = str(ref.get("kind", "")).strip()
+            namespace = str(ref.get("namespace", "")).strip()
+            name = str(ref.get("name", "")).strip()
+            reason = str(item.get("reason", "")).strip()
+            if not kind or not name or not reason:
+                continue
+            if self._is_placeholder_value(kind) or self._is_placeholder_value(name):
+                continue
+            key = (kind.lower(), namespace.lower(), name.lower())
+            if key not in allowed_refs and key != primary_ref:
+                continue
+            try:
+                confidence_value = float(item.get("confidence", 0.6))
+            except (TypeError, ValueError):
+                confidence_value = 0.6
+            normalized = {
+                "objectRef": {"kind": kind, "namespace": namespace, "name": name},
+                "reason": reason,
+                "confidence": confidence_value,
+            }
+            if normalized not in sanitized:
+                sanitized.append(normalized)
+        return sanitized
 
     def _minimal_root_cause_candidates(
         self,
@@ -594,13 +674,28 @@ class AgentService:
         normalized = dict(spec)
         workload = dict(normalized.get("workloadRef", {}))
         involved = raw_signal.get("involvedObject", {}) if isinstance(raw_signal, dict) else {}
-        kind = workload.get("kind") or involved.get("kind") or "Pod"
-        name = workload.get("name") or involved.get("name") or ""
+        signal_workload = raw_signal.get("workloadRef", {}) if isinstance(raw_signal, dict) else {}
+        kind = (
+            workload.get("kind")
+            or involved.get("kind")
+            or (signal_workload.get("kind") if isinstance(signal_workload, dict) else "")
+            or "Pod"
+        )
+        name = (
+            workload.get("name")
+            or involved.get("name")
+            or (signal_workload.get("name") if isinstance(signal_workload, dict) else "")
+            or ""
+        )
         namespace = (
             normalized.get("namespace")
             or involved.get("namespace")
+            or (signal_workload.get("namespace") if isinstance(signal_workload, dict) else "")
             or "default"
         )
+        kind = "" if self._is_placeholder_value(kind) else str(kind).strip() or "Pod"
+        name = "" if self._is_placeholder_value(name) else str(name).strip()
+        namespace = "default" if self._is_placeholder_value(namespace) else str(namespace).strip() or "default"
         normalized["cluster"] = normalized.get("cluster") or self.settings.cluster_name
         normalized["namespace"] = namespace
         normalized["workloadRef"] = {
@@ -612,28 +707,42 @@ class AgentService:
     def _normalize_report_status(self, status: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(status)
         model_info = normalized.get("modelInfo")
-        if not isinstance(model_info, dict):
-            model_info = {}
-        normalized["modelInfo"] = {
-            "name": model_info.get("name") or self._active_model_name(),
-            "fallback": bool(model_info.get("fallback", False)),
-        }
-        if model_info.get("traceId"):
-            normalized["modelInfo"]["traceId"] = str(model_info.get("traceId"))
+        normalized_model_info: dict[str, Any] = {}
+        if isinstance(model_info, dict):
+            name = model_info.get("name") or model_info.get("model")
+            provider = model_info.get("provider")
+            if name and not self._is_placeholder_value(name):
+                normalized_model_info["name"] = str(name).strip()
+            if provider and not self._is_placeholder_value(provider):
+                normalized_model_info["provider"] = str(provider).strip()
+            if "fallback" in model_info:
+                normalized_model_info["fallback"] = bool(model_info.get("fallback"))
+            if model_info.get("traceId"):
+                normalized_model_info["traceId"] = str(model_info.get("traceId"))
+        normalized["modelInfo"] = normalized_model_info
         raw_signal = normalized.get("rawSignal")
         normalized["rawSignal"] = raw_signal if isinstance(raw_signal, dict) else {}
         trace = normalized.get("diagnosisTrace")
         normalized["diagnosisTrace"] = trace if isinstance(trace, dict) else {}
-        normalized["relatedObjects"] = [
-            item
-            for item in normalized.get("relatedObjects", [])
-            if isinstance(item, dict)
-        ]
-        normalized["rootCauseCandidates"] = [
-            item
-            for item in normalized.get("rootCauseCandidates", [])
-            if isinstance(item, dict)
-        ]
+        normalized["relatedObjects"] = self._sanitize_related_objects(
+            [item for item in normalized.get("relatedObjects", []) if isinstance(item, dict)]
+        )
+        report_workload = raw_signal if isinstance(raw_signal, dict) else {}
+        normalized["rootCauseCandidates"] = self._sanitize_root_cause_candidates(
+            [item for item in normalized.get("rootCauseCandidates", []) if isinstance(item, dict)],
+            normalized["relatedObjects"],
+            TriggerContext(
+                source="scheduled",
+                cluster=self.settings.cluster_name,
+                workload=WorkloadRef(
+                    kind=str(report_workload.get("kind", "Pod") or "Pod"),
+                    namespace=str(report_workload.get("namespace", "")),
+                    name=str(report_workload.get("name", "")),
+                ),
+                symptom=str(report_workload.get("symptom", "")),
+                observed_for_seconds=0,
+            ),
+        )
         normalized["evidenceTimeline"] = [
             item
             for item in normalized.get("evidenceTimeline", [])
@@ -781,6 +890,45 @@ class AgentService:
             summary += f" Triggered by Kubernetes event {reason}."
         return summary
 
+    def _fallback_probable_causes(self, trigger: TriggerContext) -> list[str]:
+        message = str(trigger.raw_signal.get("message", "")).lower()
+        symptom = trigger.symptom
+        if symptom == "FailedMount":
+            if "secret" in message and "not found" in message:
+                return ["A required Secret for volume mount is missing in the namespace"]
+            if "configmap" in message and "not found" in message:
+                return ["A required ConfigMap for volume mount is missing in the namespace"]
+            if "persistentvolumeclaim" in message or "pvc" in message:
+                return ["A referenced PVC is not bound or unavailable for mounting"]
+        if symptom == "Pending":
+            if "unbound immediate persistentvolumeclaims" in message:
+                return ["One or more referenced PVCs are unbound, blocking scheduling"]
+            if "insufficient" in message:
+                return ["Cluster resources are insufficient for this workload scheduling request"]
+            return ["Scheduler constraints or workload dependencies are preventing pod placement"]
+        return []
+
+    def _fallback_recommendations(self, trigger: TriggerContext, base: list[str]) -> list[str]:
+        recommendations = [str(item).strip() for item in (base or []) if str(item).strip()]
+        message = str(trigger.raw_signal.get("message", "")).lower()
+        if trigger.symptom == "Pending":
+            hints = ["Review FailedScheduling events for taints, affinity, quota, and resource shortage signals"]
+            if "unbound immediate persistentvolumeclaims" in message:
+                hints.append("Verify referenced PVCs are Bound and storageClass exists")
+            for hint in hints:
+                if hint not in recommendations:
+                    recommendations.append(hint)
+        if trigger.symptom == "FailedMount":
+            hints = ["Inspect pod events and verify referenced Secret/ConfigMap/PVC objects exist"]
+            if "secret" in message and "not found" in message:
+                hints.append("Create the missing Secret or correct the secret reference in volume/env configuration")
+            if "configmap" in message and "not found" in message:
+                hints.append("Create the missing ConfigMap or correct the configMap reference in volume/env configuration")
+            for hint in hints:
+                if hint not in recommendations:
+                    recommendations.append(hint)
+        return recommendations
+
     def _fallback_evidence(self, trigger: TriggerContext) -> list[str]:
         evidence = [
             f"symptom={trigger.symptom}",
@@ -809,6 +957,13 @@ class AgentService:
             trigger.workload.namespace
             or involved.get("namespace")
             or "default"
+        )
+        workload_name = "" if self._is_placeholder_value(workload_name) else str(workload_name).strip()
+        workload_kind = "Pod" if self._is_placeholder_value(workload_kind) else str(workload_kind).strip() or "Pod"
+        workload_namespace = (
+            "default"
+            if self._is_placeholder_value(workload_namespace)
+            else str(workload_namespace).strip() or "default"
         )
         return TriggerContext(
             source=trigger.source,
@@ -846,6 +1001,10 @@ class AgentService:
             raw_signal["message"] = trigger.raw_signal.get("message")
         raw_signal["timestamp"] = raw_signal.get("timestamp") or trigger.trigger_at.astimezone(timezone.utc).isoformat()
         return raw_signal
+
+    def _is_placeholder_value(self, value: Any) -> bool:
+        text = str(value or "").strip().lower()
+        return text in {"unknown", "n/a", "na", "none", "null", "<unknown>"}
 
     def _trigger_from_report(self, report: dict) -> TriggerContext:
         spec = report.get("spec", {})
@@ -975,7 +1134,9 @@ class AgentService:
             if "unbound immediate persistentvolumeclaims" not in message.lower():
                 continue
             match = re.search(r'["\']([a-z0-9-]+)["\']', message, flags=re.IGNORECASE)
-            pvc_name = match.group(1) if match else "unknown-pvc"
+            if not match:
+                continue
+            pvc_name = match.group(1)
             self._append_root_candidate(
                 root_candidates,
                 "PVC",
