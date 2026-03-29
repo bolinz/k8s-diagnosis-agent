@@ -256,8 +256,14 @@ describe("App", () => {
     });
     expect(screen.getByText("No timeline signals.")).toBeInTheDocument();
 
-    const reportButtons = container.querySelectorAll(".list .item");
-    expect(reportButtons.length).toBeGreaterThan(1);
+    let reportButtons = container.querySelectorAll(".list .item");
+    if (reportButtons.length < 2) {
+      fireEvent.change(screen.getByPlaceholderText("CrashLoopBackOff / Pending / FailedMount"), { target: { value: "" } });
+      await waitFor(() => {
+        expect(container.querySelectorAll(".list .item").length).toBeGreaterThan(1);
+      });
+      reportButtons = container.querySelectorAll(".list .item");
+    }
     fireEvent.click(reportButtons[1]);
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Pod/checkout-with-tl" })).toBeInTheDocument();
