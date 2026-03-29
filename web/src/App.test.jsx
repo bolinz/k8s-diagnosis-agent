@@ -256,7 +256,9 @@ describe("App", () => {
     });
     expect(screen.getByText("No timeline signals.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Pod\/checkout-with-tl/i }));
+    const reportButtons = container.querySelectorAll(".list .item");
+    expect(reportButtons.length).toBeGreaterThan(1);
+    fireEvent.click(reportButtons[1]);
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Pod/checkout-with-tl" })).toBeInTheDocument();
     });
