@@ -60,23 +60,26 @@ describe("App", () => {
         },
       ],
     };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input) => {
+    const fetchMock = vi.fn((input) => {
         const url = String(input);
         if (url.includes("/api/reports/legacy-r1")) {
           return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
         }
         if (url.includes("/api/reports")) return okJson(listPayload);
         return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
-      }),
-    );
+      });
+    vi.stubGlobal("fetch", fetchMock);
     render(<App />);
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Pod/unknown" })).toBeInTheDocument();
     });
-    expect(screen.getByText(/Detail fetch failed/i)).toBeInTheDocument();
-    expect(screen.getByText("legacy summary")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("legacy summary")).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/reports\/legacy-r1/),
+      expect.objectContaining({ cache: "no-store" }),
+    );
   });
 
   it("renders detail with key signals, top candidate and timeline emphasis", async () => {
