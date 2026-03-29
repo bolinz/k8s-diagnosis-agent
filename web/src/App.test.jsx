@@ -71,11 +71,12 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Pod/unknown" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "legacy-r1" })).toBeInTheDocument();
     });
     await waitFor(() => {
       expect(screen.getByText("legacy summary")).toBeInTheDocument();
     });
+    expect(screen.getByText("Legacy / Unknown")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringMatching(/\/api\/reports\/legacy-r1/),
       expect.objectContaining({ cache: "no-store" }),

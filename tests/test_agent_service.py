@@ -1513,11 +1513,11 @@ def test_service_normalizes_report_metadata_without_unknown_placeholders():
     assert report["workload"]["name"] == "checkout-abc"
     assert report["namespace"] == "payments"
     assert report["cluster"] == "prod"
-    assert report["modelInfo"]["name"] == "gpt-5-codex"
+    assert report["modelInfo"] == {}
     assert report["rawSignal"]["reason"] == "BackOff"
 
 
-def test_service_normalizes_report_model_name_for_ollama_provider():
+def test_service_preserves_report_model_name_for_ollama_provider():
     class SparseClient(FakeKubernetesClient):
         def list_reports(self):
             return [
@@ -1561,7 +1561,120 @@ def test_service_normalizes_report_model_name_for_ollama_provider():
     )
 
     report = service.list_reports()[0]
-    assert report["modelInfo"]["name"] == "qwen3:8b"
+    assert report["modelInfo"] == {}
+
+
+def test_service_filters_placeholder_root_cause_candidates_from_report_view():
+    class SparseClient(FakeKubernetesClient):
+        def list_reports(self):
+            return [
+                {
+                    "metadata": {"name": "diagnosis-placeholder-candidates"},
+                    "spec": {
+                        "source": "scheduled",
+                        "cluster": "prod",
+                        "namespace": "diag-e2e",
+                        "symptom": "Pending",
+                        "observedFor": 600,
+                        "triggerAt": "2026-03-29T13:20:00+00:00",
+                        "workloadRef": {"kind": "Pod", "name": "checkout-abc"},
+                    },
+                    "status": {
+                        "severity": "critical",
+                        "summary": "pending",
+                        "probableCauses": ["pvc"],
+                        "evidence": ["failed scheduling"],
+                        "recommendations": ["inspect pvc"],
+                        "confidence": 0.7,
+                        "relatedObjects": [
+                            {"kind": "PVC", "namespace": "diag-e2e", "name": "e2e-unbound-pvc", "role": "affected"},
+                            {"kind": "PVC", "namespace": "diag-e2e", "name": "unknown", "role": "affected"},
+                        ],
+                        "rootCauseCandidates": [
+                            {
+                                "objectRef": {"kind": "PVC", "namespace": "diag-e2e", "name": "unknown-pvc"},
+                                "reason": "placeholder candidate",
+                                "confidence": 0.5,
+                            },
+                            {
+                                "objectRef": {"kind": "PVC", "namespace": "diag-e2e", "name": "e2e-unbound-pvc"},
+                                "reason": "valid pvc candidate",
+                                "confidence": 0.9,
+                            },
+                        ],
+                        "rawSignal": {"kind": "Pod", "name": "checkout-abc", "namespace": "diag-e2e", "symptom": "Pending"},
+                    },
+                }
+            ]
+
+    service = AgentService(
+        settings=build_settings(),
+        client=SparseClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient([]),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+    )
+
+    report = service.list_reports()[0]
+    assert all(item.get("name") != "unknown" for item in report["relatedObjects"])
+    assert all(item["objectRef"].get("name") != "unknown-pvc" for item in report["rootCauseCandidates"])
+    assert any(item["objectRef"].get("name") == "e2e-unbound-pvc" for item in report["rootCauseCandidates"])
+
+
+def test_process_trigger_failed_mount_fallback_adds_specific_recommendation():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient(
+                [
+                    {
+                        "output_text": json.dumps(
+                            {
+                                "summary": "",
+                                "severity": "",
+                                "probableCauses": [],
+                                "evidence": [],
+                                "recommendations": [],
+                                "confidence": 0.0,
+                            }
+                        )
+                    }
+                ]
+            ),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+            max_diagnosis_seconds=1,
+        ),
+    )
+
+    report = service.process_trigger(
+        TriggerContext(
+            source="event",
+            cluster="prod",
+            workload=WorkloadRef(kind="Pod", namespace="diag-e2e", name="checkout-abc"),
+            symptom="FailedMount",
+            observed_for_seconds=300,
+            raw_signal={
+                "eventType": "Warning",
+                "reason": "FailedMount",
+                "message": "MountVolume.SetUp failed for volume \"config\" : secret \"missing-secret\" not found",
+            },
+        )
+    )
+
+    status = report["status"]
+    joined_recommendations = " ".join(status["recommendations"]).lower()
+    joined_causes = " ".join(status["probableCauses"]).lower()
+    assert "secret" in joined_recommendations
+    assert "missing" in joined_recommendations
+    assert "secret" in joined_causes
 
 
 def test_process_trigger_normalizes_event_metadata_before_writing():
