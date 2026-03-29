@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
 
@@ -10,6 +10,11 @@ function okJson(payload) {
 }
 
 describe("App", () => {
+  beforeEach(() => {
+    cleanup();
+    window.history.replaceState({}, "", "/");
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     Object.defineProperty(window, "localStorage", {
@@ -19,8 +24,8 @@ describe("App", () => {
       },
       configurable: true,
     });
-    window.history.replaceState({}, "", "/");
     cleanup();
+    window.history.replaceState({}, "", "/");
   });
 
   it("renders empty list state when API returns no reports", async () => {
@@ -200,6 +205,7 @@ describe("App", () => {
   });
 
   it("does not crash when switching between reports with and without timeline events", async () => {
+    window.history.replaceState({}, "", "/");
     const listPayload = {
       items: [
         {
