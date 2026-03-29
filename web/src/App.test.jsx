@@ -195,6 +195,64 @@ describe("App", () => {
     expect(screen.getByLabelText("Role")).toHaveValue("owner");
   });
 
+  it("does not crash when switching between reports with and without timeline events", async () => {
+    const listPayload = {
+      items: [
+        {
+          name: "r-no-tl",
+          namespace: "diag-e2e",
+          severity: "critical",
+          symptom: "Pending",
+          summary: "no timeline report",
+          workload: { kind: "Pod", name: "checkout-no-tl" },
+        },
+        {
+          name: "r-with-tl",
+          namespace: "diag-e2e",
+          severity: "critical",
+          symptom: "FailedMount",
+          summary: "with timeline report",
+          workload: { kind: "Pod", name: "checkout-with-tl" },
+        },
+      ],
+    };
+    const details = {
+      "r-no-tl": {
+        ...listPayload.items[0],
+        evidenceTimeline: [],
+      },
+      "r-with-tl": {
+        ...listPayload.items[1],
+        evidenceTimeline: [
+          { time: "2026-03-28T02:21:10+00:00", signal: "FailedMount" },
+          { time: "2026-03-28T02:22:10+00:00", signal: "PVCPending" },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input) => {
+        const url = String(input);
+        if (url.includes("/api/reports/r-no-tl")) return okJson(details["r-no-tl"]);
+        if (url.includes("/api/reports/r-with-tl")) return okJson(details["r-with-tl"]);
+        if (url.includes("/api/reports")) return okJson(listPayload);
+        return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+      }),
+    );
+
+    const { container } = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Pod/checkout-no-tl" })).toBeInTheDocument();
+    });
+    expect(screen.getByText("No timeline signals.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Pod\/checkout-with-tl/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Pod/checkout-with-tl" })).toBeInTheDocument();
+    });
+    expect(container.querySelectorAll(".timeline-point").length).toBeGreaterThan(0);
+  });
+
   it("hydrates filters/timezone/selected report from URL and keeps URL synced", async () => {
     window.history.replaceState({}, "", "/?tz=UTC&sym=failedmount&report=r2");
     const listPayload = {

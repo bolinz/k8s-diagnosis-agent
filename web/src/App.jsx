@@ -192,21 +192,18 @@ function HorizontalTimeline({
   onSelectEvent,
 }) {
   const scrollRef = useRef(null);
-  if (!Array.isArray(events) || events.length === 0) return <div className="empty">No timeline signals.</div>;
-  const parsed = events
-    .map((x) => ({ ...x, ms: Date.parse(x.time || ""), signature: eventSignature(x) }))
-    .filter((x) => Number.isFinite(x.ms))
-    .sort((a, b) => a.ms - b.ms);
-  if (parsed.length === 0) return <div className="empty">No timeline signals.</div>;
-  const min = parsed[0].ms;
-  const max = parsed[parsed.length - 1].ms;
-  const range = Math.max(max - min, 1);
+  const parsed = Array.isArray(events)
+    ? events
+        .map((x) => ({ ...x, ms: Date.parse(x.time || ""), signature: eventSignature(x) }))
+        .filter((x) => Number.isFinite(x.ms))
+        .sort((a, b) => a.ms - b.ms)
+    : [];
   const width = 960;
   const right = 920;
   const railWidth = 880;
 
   useEffect(() => {
-    if (!activeEventSignature) return;
+    if (!activeEventSignature || parsed.length === 0) return;
     const root = scrollRef.current;
     if (!root) return;
     const target = root.querySelector(`[data-event-signature="${activeEventSignature.replaceAll("\"", "\\\"")}"]`);
@@ -214,7 +211,12 @@ function HorizontalTimeline({
     if (typeof target.scrollIntoView === "function") {
       target.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
     }
-  }, [activeEventSignature, events]);
+  }, [activeEventSignature, parsed.length]);
+
+  if (parsed.length === 0) return <div className="empty">No timeline signals.</div>;
+  const min = parsed[0].ms;
+  const max = parsed[parsed.length - 1].ms;
+  const range = Math.max(max - min, 1);
 
   return (
     <div className="timeline-scroll" ref={scrollRef}>
