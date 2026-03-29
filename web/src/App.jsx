@@ -181,6 +181,55 @@ function compactSignalLabel(value) {
   return `${text.slice(0, 23)}…`;
 }
 
+function normalizeConfidence(value) {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(1, n));
+}
+
+function confidenceLevel(value) {
+  const c = normalizeConfidence(value);
+  if (c === null) return "unknown";
+  if (c >= 0.8) return "high";
+  if (c >= 0.55) return "medium";
+  return "low";
+}
+
+function keywords(text) {
+  return new Set(
+    String(text || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((x) => x.length >= 4),
+  );
+}
+
+function recommendationEvidenceMap(recommendations, evidence, keySignals) {
+  const pool = [...(Array.isArray(evidence) ? evidence : []), ...(Array.isArray(keySignals) ? keySignals : [])]
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
+  if (!Array.isArray(recommendations) || recommendations.length === 0) return [];
+  return recommendations.map((rec) => {
+    const recText = String(rec || "");
+    const recKeys = keywords(recText);
+    const linked = [];
+    for (const item of pool) {
+      const itemKeys = keywords(item);
+      let score = 0;
+      for (const k of recKeys) {
+        if (itemKeys.has(k)) score += 1;
+      }
+      if (score > 0) linked.push({ item, score });
+    }
+    linked.sort((a, b) => b.score - a.score || a.item.localeCompare(b.item));
+    return {
+      recommendation: recText,
+      evidence: linked.slice(0, 2).map((x) => x.item),
+    };
+  });
+}
+
 function HorizontalTimeline({
   events,
   timezone,
@@ -831,6 +880,26 @@ export default function App() {
     rawSignal.deploymentCondition ? `Deployment condition: ${rawSignal.deploymentCondition}` : "",
     rawSignal.pvcPhase ? `PVC phase: ${rawSignal.pvcPhase}` : "",
   ].filter(Boolean);
+  const modelInfo = selected?.modelInfo || {};
+  const modelName = String(modelInfo.name || modelInfo.model || "rule-fallback");
+  const providerName = String(modelInfo.provider || (modelName.includes("qwen") ? "ollama" : "openai"));
+  const fallbackUsed = Boolean(modelInfo.fallback);
+  const confidenceValue = normalizeConfidence(selected?.confidence);
+  const confidenceLabel = confidenceLevel(selected?.confidence);
+  const recommendationLinks = useMemo(
+    () => recommendationEvidenceMap(selectedRecommendations, selectedEvidence, keySignals),
+    [selectedRecommendations, selectedEvidence, keySignals],
+  );
+  const analysisStages = useMemo(() => {
+    const hasSignals = keySignals.length > 0 || (selected?.symptom && selected?.source);
+    const hasCorrelation = displayedRelatedObjects.length > 0 || rootCandidates.length > 0 || orderedVisibleTimelineEvents.length > 0;
+    const hasConclusion = Boolean(selected?.summary) || selectedRecommendations.length > 0;
+    return [
+      { name: "Signal Intake", done: hasSignals },
+      { name: "Correlation", done: hasCorrelation },
+      { name: "Conclusion", done: hasConclusion },
+    ];
+  }, [keySignals, selected, displayedRelatedObjects.length, rootCandidates.length, orderedVisibleTimelineEvents.length, selectedRecommendations.length]);
   const hasOverviewContent =
     keySignals.length > 0 || selectedRecommendations.length > 0 || selectedCauses.length > 0 || selectedEvidence.length > 0;
   const hasAttributionContent =
@@ -1113,6 +1182,28 @@ export default function App() {
                 <span className={`severity ${severityClass(selected.severity)}`}>{selected.severity || "info"}</span>
               </div>
               <p className="lead">{selected.summary || "No summary provided."}</p>
+              <section className="card ai-session-card">
+                <div className="ai-session-head">
+                  <h3>AI Analysis Session</h3>
+                  <div className="ai-meta">
+                    <span className={`ai-confidence ai-confidence-${confidenceLabel}`}>Confidence: {confidenceValue === null ? "unknown" : confidenceLabel}</span>
+                    <span className={`ai-fallback ${fallbackUsed ? "ai-fallback-yes" : "ai-fallback-no"}`}>{fallbackUsed ? "Fallback" : "Model Run"}</span>
+                  </div>
+                </div>
+                <div className="ai-stage-row">
+                  {analysisStages.map((stage) => (
+                    <span key={stage.name} className={`ai-stage ${stage.done ? "ai-stage-done" : "ai-stage-pending"}`}>
+                      {stage.done ? "✓" : "…"} {stage.name}
+                    </span>
+                  ))}
+                </div>
+                <div className="ai-kv">
+                  <span>Provider</span><strong>{providerName}</strong>
+                  <span>Model</span><strong>{modelName}</strong>
+                  <span>Analysis Version</span><strong>{selected?.analysisVersion || "-"}</strong>
+                  <span>Last Analyzed</span><strong>{formatAt(selected?.lastAnalyzedAt, timezone) || "-"}</strong>
+                </div>
+              </section>
               <div className="detail-view-toggle">
                 {DETAIL_VIEWS.map((view) => (
                   <button
@@ -1201,6 +1292,21 @@ export default function App() {
                   <h3>Fix Suggestions</h3>
                   {selectedRecommendations.length === 0 ? <div className="empty">No suggestions.</div> : null}
                   <ul>{selectedRecommendations.map((x) => <li key={x}>{x}</li>)}</ul>
+                </section>
+
+                <section className="card">
+                  <h3>Why This Recommendation</h3>
+                  {recommendationLinks.length === 0 ? <div className="empty">No recommendation evidence mapping.</div> : null}
+                  {recommendationLinks.map((x) => (
+                    <div key={x.recommendation} className="rec-link-item">
+                      <strong>{x.recommendation}</strong>
+                      {x.evidence.length > 0 ? (
+                        <ul>{x.evidence.map((ev) => <li key={`${x.recommendation}-${ev}`}>{ev}</li>)}</ul>
+                      ) : (
+                        <div className="empty">No direct evidence match found.</div>
+                      )}
+                    </div>
+                  ))}
                 </section>
 
                 <section className="card">

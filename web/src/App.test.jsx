@@ -146,6 +146,9 @@ describe("App", () => {
     expect(screen.getByText(/Event reason: FailedMount/i)).toBeInTheDocument();
     expect(screen.getByText("Top Root Candidate")).toBeInTheDocument();
     expect(screen.getByText("Root Cause Candidates")).toBeInTheDocument();
+    expect(screen.getByText("AI Analysis Session")).toBeInTheDocument();
+    expect(screen.getByText(/Provider/i)).toBeInTheDocument();
+    expect(screen.getByText("Why This Recommendation")).toBeInTheDocument();
     expect(screen.getByLabelText("auto-refresh")).toBeChecked();
     expect(screen.getByRole("combobox", { name: "refresh-interval" })).toHaveValue("15");
     expect(screen.getByText("Observability")).toBeInTheDocument();
