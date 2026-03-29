@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.5.2 (Planned)
+
+Release type: patch release for UI experience density, analysis transparency, and frontend stability.
+
+### Added
+
+- New `AI Analysis Session` detail card showing provider/model/fallback metadata and stage progress (`Signal Intake`, `Correlation`, `Conclusion`).
+- New `Why This Recommendation` section mapping recommendations to evidence snippets when available.
+- New release walkthrough doc with screenshots: `docs/releases/v0.5.2.md`.
+
+### Changed
+
+- Compact top bar and compact summary strip to reclaim vertical space.
+- Detail-first layout ratio updated to `30/70` (and `24/76` on large screens).
+- Card spacing and control density tuned to reduce excessive scrolling.
+
+### Fixed
+
+- Detail panel no longer blanks when legacy report detail fetch fails.
+- Fixed timeline hook-order crash when switching between reports with and without timeline events.
+
 ## v0.5.1 (Unreleased)
 
 Release type: patch release for frontend packaging and deployment consistency.

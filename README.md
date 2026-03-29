@@ -4,6 +4,8 @@
 
 Latest stable release: `v0.5.1`
 
+Upcoming release preview: `v0.5.2` UX + AI analysis experience refresh ([details](./docs/releases/v0.5.2.md))
+
 ## Features
 
 - Periodic cluster scans for supported failure symptoms
@@ -195,6 +197,16 @@ The current CI/release workflows:
 - frontend static files are packaged with `agent.ui` during wheel install
 - `.dockerignore` excludes local frontend build output to avoid stale assets
 
+Upcoming `v0.5.2` preview includes:
+
+- compact top bar and compact status strip to increase detail viewport
+- wider detail workspace (`30/70`, large screen `24/76`) to reduce frequent scrolling
+- `AI Analysis Session` card with provider/model/fallback visibility and stage progress
+- `Why This Recommendation` section linking recommendations to evidence snippets
+- timeline-switch blank-page fix for legacy reports
+
+See full walkthrough and screenshots: [docs/releases/v0.5.2.md](./docs/releases/v0.5.2.md)
+
 `v0.5.0` introduced the major UI/operability updates including:
 
 - timeline density strip + focused event navigation
@@ -238,4 +250,3 @@ The current CI/release workflows:
 ## OpenAI Runtime Note
 
 The runtime integrates with the OpenAI Responses API and uses `gpt-5-codex` by default for tool-assisted diagnosis. The cluster service does not require the Codex desktop application or CLI.
-- Alert task status query via `GET /api/alerts/{requestId}`
