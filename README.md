@@ -1,69 +1,31 @@
 # k8s-diagnosis-agent
 
-`k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
+`k8s-diagnosis-agent` is a read-only Kubernetes workload diagnostics service.
+It detects symptoms, correlates related objects, writes `DiagnosisReport` CRs, and exposes a built-in UI/API for operators.
 
-Latest stable release: `v0.5.1`
+- Latest stable: `v0.5.2`
+- Next patch: `v0.5.3` ([release draft](./docs/releases/v0.5.3.md))
 
-Upcoming release preview: `v0.5.2` UX + AI analysis experience refresh ([details](./docs/releases/v0.5.2.md))
+## Core Capabilities
 
-## Features
-
-- Periodic cluster scans for supported failure symptoms
-- Cluster-wide event watch with filtered diagnosis triggers
-- Structured `DiagnosisReport` CRs with fallback-safe status content
-- Embedded HTTP API and UI for browsing diagnosis results
-- GHCR-based container distribution and Kubernetes deployment manifests
-- Read-only cluster inspection only; no automatic remediation
-
-## Architecture
-
-- `agent/triggers/`: scheduler, alert ingress, and event watcher
-- `agent/analyzers/`: deterministic symptom detection and fallback diagnosis
-- `agent/tools/`: read-only Kubernetes tools exposed to the model layer
-- `agent/orchestrator/`: GPT-5-Codex / Responses API interaction
-- `agent/reporting/`: `DiagnosisReport` spec/status writing and backfill
-- `agent/ui/`: embedded API and browser UI
-- `deploy/`: base manifests for CRD, RBAC, Deployment, Service, Ingress, and NetworkPolicy
-
-## Supported Diagnosis Paths
-
-- Scheduled anomaly scans
-- Warning event-triggered diagnosis
-- Alert webhook ingestion via async `POST /alert`
-
-Current supported symptoms:
-
-- `CrashLoopBackOff`
-- `ImagePullBackOff`
-- `ErrImagePull`
-- `OOMKilled`
-- `Pending`
-- `ProbeFailure`
+- Scheduled scan + cluster-wide warning-event watch + alert webhook (`POST /alert`)
+- Cross-object correlation (`relatedObjects`, `rootCauseCandidates`, `evidenceTimeline`, `impactSummary`)
+- Model provider runtime (`MODEL_PROVIDER=openai|ollama`) with fallback-safe output
+- Embedded Workbench UI and JSON API (`/api/reports`, `/api/reports/{name}`)
+- CI with backend tests + frontend unit + Playwright e2e + GHCR image publish
 
 ## Quick Start
 
-### Local Development
+### Local
 
 ```bash
 cd k8s-diagnosis-agent
 python3 -m pip install -e ".[dev]"
 python3 -m pytest -q
 python3 -m agent.app run-once
-cd web && npm install && npm run build
 ```
 
-### Container Image
-
-Published images are available at:
-
-```bash
-ghcr.io/bolinz/k8s-diagnosis-agent-app:latest
-ghcr.io/bolinz/k8s-diagnosis-agent-app:sha-<full-commit-sha>
-```
-
-For cluster deployments, prefer immutable `sha-<full-commit-sha>` tags. If you fork the repository, replace `bolinz` with your own GitHub owner.
-
-### Deploy to Kubernetes
+### Deploy
 
 ```bash
 kubectl apply -k deploy/base
@@ -73,180 +35,38 @@ kubectl set image deployment/k8s-diagnosis-agent \
 kubectl rollout status deployment/k8s-diagnosis-agent -n k8s-diagnosis-system
 ```
 
-### Access the UI
-
-The default manifest exposes the UI through an `nginx` ingress:
-
-- host: `k8s-diagnosis.example.com`
-- service: `k8s-diagnosis-agent`
-- port: `8080`
-
-You can also use `kubectl port-forward` for local inspection:
+### UI
 
 ```bash
 kubectl port-forward -n k8s-diagnosis-system svc/k8s-diagnosis-agent 18080:8080
 ```
 
-## Configuration
+Open `http://127.0.0.1:18080`.
 
-Environment variables:
+## Key Configuration
 
-- `OPENAI_API_KEY`: enables Codex-backed diagnosis; without it the service uses fallback logic
-- `MODEL_PROVIDER`: `openai` or `ollama`, default `openai`
-- `OPENAI_MODEL`: defaults to `gpt-5-codex`
-- `OPENAI_API_BASE_URL`: defaults to `https://api.openai.com/v1`
-- `OLLAMA_BASE_URL`: defaults to `http://127.0.0.1:11434`
-- `OLLAMA_MODEL`: required when `MODEL_PROVIDER=ollama`
-- `LOG_LEVEL`: `DEBUG|INFO|WARNING|ERROR`, default `INFO`
-- `K8S_DIAGNOSIS_REQUEST_TIMEOUT_SECONDS`: model request timeout in seconds, default `45`
-- `K8S_DIAGNOSIS_CLUSTER`: logical cluster name written into reports
-- `K8S_DIAGNOSIS_NAMESPACE`: namespace that stores `DiagnosisReport` resources
-- `K8S_DIAGNOSIS_SCAN_INTERVAL_SECONDS`: scheduler interval, default `300`
-- `K8S_DIAGNOSIS_MIN_OBSERVATION_SECONDS`: scan threshold, default `600`
-- `K8S_DIAGNOSIS_MAX_TOOL_CALLS`: max model tool invocations, default `8`
-- `K8S_DIAGNOSIS_MAX_DIAGNOSIS_SECONDS`: max autonomous diagnosis loop duration, default `45`
-- `K8S_DIAGNOSIS_SCOPE_MODE`: `strict|relaxed`, default `strict`
-- `K8S_DIAGNOSIS_SCOPE_ALLOWLIST`: comma-separated namespaces enabled when `SCOPE_MODE=relaxed`
-- `K8S_DIAGNOSIS_MAX_INPUT_BYTES`: max serialized tool output size, default `20000`
-- `K8S_DIAGNOSIS_WEBHOOK_PORT`: API/UI port, default `8080`
-- `K8S_DIAGNOSIS_EVENT_DEDUPE_WINDOW_SECONDS`: event dedupe window, default `300`
-- `K8S_DIAGNOSIS_EVENT_STORM_THRESHOLD`: repeated event count threshold that emits one aggregated fallback report, default `5`
+- `MODEL_PROVIDER=openai|ollama`
+- OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_API_BASE_URL`
+- Ollama: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`
+- Runtime: `LOG_LEVEL`, `K8S_DIAGNOSIS_SCAN_INTERVAL_SECONDS`, `K8S_DIAGNOSIS_MAX_DIAGNOSIS_SECONDS`
 
-Secrets and image pull notes:
+Notes:
 
-- `k8s-diagnosis-agent-secrets` may contain `OPENAI_API_KEY`; it is optional
-- `ghcr-creds` is used to pull private or rate-limited GHCR images
+- Without `OPENAI_API_KEY`, OpenAI provider cannot run.
+- Model diagnosis still works with Ollama when `MODEL_PROVIDER=ollama` and `OLLAMA_MODEL` is set.
 
-Frontend build notes:
+## Limits
 
-- Framework UI source is under `web/` (React + Vite)
-- Build output is `agent/ui/frontend_dist/`
-- HTTP server serves `frontend_dist` from `/` and `/assets/*` when present
-- Node mock preview: `cd web && npm run preview:serve`
-- Frontend unit tests: `cd web && npm run test`
-- Frontend e2e tests (Playwright): `cd web && npm run test:e2e`
-- Frontend e2e with managed preview server: `cd web && npm run test:e2e:with-server`
+- Single-cluster oriented
+- Read-only operations (no automatic remediation)
+- No external metrics platform integration in core analysis path
 
-Frontend timeline/workbench interactions:
+## Documentation
 
-- Horizontal timeline with window filter (`all/6h/1h/15m/5m`) and search
-- Event density strip for quick jump to dense time buckets
-- Event navigator grouped by signal with collapse/expand controls
-- Group sort modes in navigator (`By Count` / `By Time`)
-- Persistent UI preferences (timezone, auto-refresh, ops panel, timeline group sort)
-- Keyboard shortcuts:
-  - `/`: focus symptom search
-  - `j` / `k`: next/previous report
-  - `1` / `2` / `3` / `4`: switch detail view (`all/overview/attribution/timeline`)
-  - `,` / `.`: previous/next timeline event
-  - `o`: toggle observability panel
-  - `?`: toggle shortcut help panel
-
-Example Ollama runtime configuration:
-
-```bash
-kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
-  MODEL_PROVIDER=ollama \
-  OLLAMA_BASE_URL=http://ollama.local:11434 \
-  OLLAMA_MODEL=qwen3:8b \
-  LOG_LEVEL=DEBUG \
-  K8S_DIAGNOSIS_REQUEST_TIMEOUT_SECONDS=120
-```
-
-## Limits and Known Boundaries
-
-- Single-cluster oriented deployment model
-- Read-only operational scope
-- No automatic remediation or write-back to application manifests
-- No persistent database; UI reads directly from `DiagnosisReport` objects
-- Without `OPENAI_API_KEY`, all diagnoses use deterministic fallback output
-- Tool calls are scope-guarded to the trigger namespace for namespaced APIs
-- In `relaxed` scope mode, namespaced probing is limited to trigger namespace plus explicit allowlist
-
-## Capability Validation
-
-The project includes a reproducible complex-failure integration scenario:
-
-- guide: `docs/testing/complex-failure-e2e.md`
-- injector: `deploy/e2e/complex-failure.yaml`
-- runner/assertion: `scripts/e2e/run_complex_failure.sh` + `scripts/e2e/assert_complex_failure.py`
-
-Latest validated run (2026-03-27) passed on cluster `<redacted-cluster>`, producing:
-
-- report: `diagnosis-02212e9683`
-- symptom: `Pending`
-- structured correlation: `relatedObjects=8`, `rootCauseCandidates=4`
-
-## Release and Versioning
-
-- Latest stable release: `v0.5.1`
-- Python package version: `0.5.1`
-- Helm chart version: `0.5.1`
-- GitHub releases are source-first and reference GHCR images plus deployment docs
-
-The current CI/release workflows:
-
-- runs backend and frontend tests (including Playwright e2e) on PRs and pushes
-- pushes container images on `main` and tag pushes
-- uses shell `docker` commands for image build and push
-- auto-creates GitHub Releases on `v*` tag pushes
-
-`v0.5.1` is a patch release focused on deployment consistency:
-
-- runtime image now bundles built Workbench frontend assets
-- frontend static files are packaged with `agent.ui` during wheel install
-- `.dockerignore` excludes local frontend build output to avoid stale assets
-
-Upcoming `v0.5.2` preview includes:
-
-- compact top bar and compact status strip to increase detail viewport
-- wider detail workspace (`30/70`, large screen `24/76`) to reduce frequent scrolling
-- `AI Analysis Session` card with provider/model/fallback visibility and stage progress
-- `Why This Recommendation` section linking recommendations to evidence snippets
-- timeline-switch blank-page fix for legacy reports
-
-See full walkthrough and screenshots: [docs/releases/v0.5.2.md](./docs/releases/v0.5.2.md)
-
-`v0.5.0` introduced the major UI/operability updates including:
-
-- timeline density strip + focused event navigation
-- grouped event navigator with sorting/collapse and keyboard shortcuts
-- shortcut help panel and persisted timeline group sort preferences
-- stronger frontend CI gating (`vitest + playwright e2e`)
-
-`v0.4.8` introduced the reliability patch for webhook execution flow:
-
-- `POST /alert` now returns immediately with `202` and `requestId`, and diagnosis runs asynchronously
-- new `GET /api/alerts/{requestId}` endpoint to inspect alert task status/result
-- HTTP response writing now handles `BrokenPipeError` and `ConnectionResetError` gracefully to avoid traceback noise when clients disconnect
-
-`v0.4.7` extends controlled autonomous probing and attribution clarity:
-
-- deterministic root-cause candidate scoring with ranking metadata
-- event-storm aggregation + suppression threshold
-- diagnosis trace metadata (`traceId`, tool sequence, fallback reason)
-- improved attribution readability in UI (`Top Root Candidate`, timeline emphasis)
-
-`v0.4.6` is a patch release focused on model output normalization correctness:
-
-- normalize string-valued `probableCauses`, `evidence`, and `recommendations` into single-item lists
-- prevent per-character list corruption when a provider returns plain strings
-- normalize severity aliases (for example `High`) to supported values (`critical|warning|info`)
-
-`v0.4.5` expanded diagnosis breadth for workload operations and improved operator-facing signals:
-
-- scheduler and mount fallback refinement (`FailedScheduling` and `FailedMount` subtypes)
-- image-pull subtype refinement (auth vs not-found vs network)
-- new read-only tools: `get_namespace_events` and `get_node_events`
-- report/API/UI enrichment with `category` and `primarySignal`
-- minimal runtime metrics exposed via `/metrics`
-
-## Contributing and License
-
-- Contribution guide: [CONTRIBUTING.md](./CONTRIBUTING.md)
-- Security notes: [SECURITY.md](./SECURITY.md)
+- Docs index: [docs/README.md](./docs/README.md)
+- Release notes: [docs/releases](./docs/releases)
+- Changelog: [CHANGELOG.md](./CHANGELOG.md)
+- Complex-failure validation: [docs/testing/complex-failure-e2e.md](./docs/testing/complex-failure-e2e.md)
+- Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Security: [SECURITY.md](./SECURITY.md)
 - License: [MIT](./LICENSE)
-
-## OpenAI Runtime Note
-
-The runtime integrates with the OpenAI Responses API and uses `gpt-5-codex` by default for tool-assisted diagnosis. The cluster service does not require the Codex desktop application or CLI.

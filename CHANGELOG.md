@@ -1,6 +1,23 @@
 # Changelog
 
-## v0.5.2 (Planned)
+## v0.5.3 (Planned)
+
+Release type: patch release focused on report integrity fixes and CI/CD reliability improvements.
+
+### Fixed
+
+- Tightened report completeness checks so blank/placeholder `summary`, `evidence`, and `recommendations` are treated as incomplete.
+- `list_reports` and `get_report` now normalize sparse legacy records with fallback-safe `summary/evidence/recommendations`.
+- Backfill now rewrites reports that contain only whitespace/placeholder values in key status fields.
+
+### Changed
+
+- CI workflow now uses concurrency cancellation to stop superseded runs on the same ref.
+- Frontend CI split into `frontend-unit` and `frontend-e2e` jobs for clearer failure isolation.
+- Python test job now includes `compileall` gate.
+- Container build switched to Buildx with GHA cache for faster repeated builds.
+
+## v0.5.2
 
 Release type: patch release for UI experience density, analysis transparency, and frontend stability.
 

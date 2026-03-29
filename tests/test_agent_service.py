@@ -1459,6 +1459,59 @@ def test_backfill_rewrites_incomplete_reports():
     assert writer.calls[0][1].evidence
 
 
+def test_backfill_treats_blank_and_placeholder_fields_as_incomplete():
+    class FakeWriter:
+        def __init__(self):
+            self.calls = []
+
+        def upsert_report(self, trigger, diagnosis, model, prefix, category="", primary_signal=""):
+            self.calls.append((trigger, diagnosis, model, prefix, category, primary_signal))
+            return {"ok": True}
+
+    class IncompleteClient(FakeKubernetesClient):
+        def list_reports(self):
+            return [
+                {
+                    "metadata": {"name": "diagnosis-empty"},
+                    "spec": {
+                        "source": "event",
+                        "cluster": "prod",
+                        "namespace": "payments",
+                        "symptom": "FailedMount",
+                        "observedFor": 60,
+                        "triggerAt": "2026-03-22T05:00:00+00:00",
+                        "workloadRef": {"kind": "Pod", "name": "checkout-abc"},
+                    },
+                    "status": {
+                        "summary": "  ",
+                        "evidence": [" ", "n/a"],
+                        "recommendations": ["", "unknown"],
+                    },
+                }
+            ]
+
+    client = IncompleteClient()
+    writer = FakeWriter()
+    service = AgentService(
+        settings=build_settings(),
+        client=client,
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient([]),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+        report_writer=writer,
+    )
+    updated = service.backfill_incomplete_reports()
+    assert updated == [{"ok": True}]
+    assert writer.calls
+    assert writer.calls[0][1].summary
+    assert writer.calls[0][1].evidence
+    assert writer.calls[0][1].recommendations
+
+
 def test_service_normalizes_report_metadata_without_unknown_placeholders():
     class SparseClient(FakeKubernetesClient):
         def list_reports(self):
@@ -1515,6 +1568,53 @@ def test_service_normalizes_report_metadata_without_unknown_placeholders():
     assert report["cluster"] == "prod"
     assert report["modelInfo"] == {}
     assert report["rawSignal"]["reason"] == "BackOff"
+
+
+def test_service_list_reports_fills_empty_legacy_status_fields():
+    class SparseClient(FakeKubernetesClient):
+        def list_reports(self):
+            return [
+                {
+                    "metadata": {"name": "diagnosis-legacy-empty"},
+                    "spec": {
+                        "source": "scheduled",
+                        "cluster": "prod",
+                        "namespace": "payments",
+                        "symptom": "Pending",
+                        "observedFor": 300,
+                        "triggerAt": "2026-03-22T05:00:00+00:00",
+                        "workloadRef": {"kind": "Pod", "name": "checkout-abc"},
+                    },
+                    "status": {
+                        "severity": "warning",
+                        "summary": "",
+                        "probableCauses": [],
+                        "evidence": ["", "n/a"],
+                        "recommendations": [],
+                        "confidence": 0.4,
+                        "modelInfo": {},
+                        "rawSignal": {},
+                    },
+                }
+            ]
+
+    service = AgentService(
+        settings=build_settings(),
+        client=SparseClient(),
+        codex_agent=CodexDiagnosisAgent(
+            responses_client=FakeResponsesClient([]),
+            rule_engine=RuleEngine(cluster_name="prod", min_observation_seconds=600),
+            model="gpt-5-codex",
+            max_tool_calls=8,
+            max_input_bytes=20000,
+        ),
+    )
+
+    report = service.list_reports()[0]
+    assert report["summary"].startswith("Detected Pending")
+    assert report["evidence"]
+    assert report["recommendations"]
+    assert report["probableCauses"]
 
 
 def test_service_preserves_report_model_name_for_ollama_provider():

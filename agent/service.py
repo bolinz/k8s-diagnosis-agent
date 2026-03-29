@@ -340,7 +340,9 @@ class AgentService:
             return updated
         for report in self.client.list_reports():
             status = report.get("status", {})
-            if status.get("summary") and status.get("evidence"):
+            if self._has_text_value(status.get("summary")) and self._has_text_items(status.get("evidence")) and self._has_text_items(
+                status.get("recommendations")
+            ):
                 continue
             trigger = self._trigger_from_report(report)
             diagnosis = self._ensure_complete_diagnosis(
@@ -375,6 +377,32 @@ class AgentService:
         status = report.get("status", {})
         spec = self._normalize_report_spec(spec, status.get("rawSignal", {}))
         status = self._normalize_report_status(status)
+        trigger = self._normalize_trigger(
+            TriggerContext(
+                source=spec.get("source", "scheduled"),
+                cluster=spec.get("cluster", self.settings.cluster_name),
+                workload=WorkloadRef(
+                    kind=spec.get("workloadRef", {}).get("kind", "Pod"),
+                    namespace=spec.get("namespace", "default"),
+                    name=spec.get("workloadRef", {}).get("name", ""),
+                ),
+                symptom=spec.get("symptom", ""),
+                observed_for_seconds=int(spec.get("observedFor", 0) or 0),
+                raw_signal=status.get("rawSignal", {}),
+            )
+        )
+        summary = str(status.get("summary", "")).strip()
+        if not summary:
+            summary = self._fallback_summary(trigger)
+        probable_causes = self._clean_text_list(status.get("probableCauses"))
+        if not probable_causes:
+            probable_causes = self._fallback_probable_causes(trigger)
+        evidence = self._clean_text_list(status.get("evidence"))
+        if not evidence:
+            evidence = self._fallback_evidence(trigger)
+        recommendations = self._clean_text_list(status.get("recommendations"))
+        if not recommendations:
+            recommendations = self._fallback_recommendations(trigger, [])
         workload = spec.get("workloadRef", {})
         return {
             "name": metadata.get("name", ""),
@@ -389,10 +417,10 @@ class AgentService:
                 "name": workload.get("name", ""),
             },
             "severity": status.get("severity", "warning"),
-            "summary": status.get("summary", ""),
-            "probableCauses": status.get("probableCauses", []),
-            "evidence": status.get("evidence", []),
-            "recommendations": status.get("recommendations", []),
+            "summary": summary,
+            "probableCauses": probable_causes,
+            "evidence": evidence,
+            "recommendations": recommendations,
             "confidence": status.get("confidence", 0.0),
             "relatedObjects": status.get("relatedObjects", []),
             "rootCauseCandidates": status.get("rootCauseCandidates", []),
@@ -444,22 +472,25 @@ class AgentService:
             related_objects,
             trigger,
         )
-        probable_causes = diagnosis.probable_causes or fallback.probable_causes or self._fallback_probable_causes(trigger)
+        probable_causes = self._clean_text_list(diagnosis.probable_causes)
+        if not probable_causes:
+            probable_causes = self._clean_text_list(fallback.probable_causes) or self._fallback_probable_causes(trigger)
         if not root_candidates:
             root_candidates = self._minimal_root_cause_candidates(
                 trigger,
                 related_objects,
                 probable_causes,
             )
-        recommendations = diagnosis.recommendations or self._fallback_recommendations(
+        recommendations = self._clean_text_list(diagnosis.recommendations) or self._fallback_recommendations(
             trigger,
-            fallback.recommendations,
+            self._clean_text_list(fallback.recommendations),
         )
+        evidence = self._clean_text_list(diagnosis.evidence) or self._fallback_evidence(trigger)
         return DiagnosisResult(
             summary=summary,
             severity=diagnosis.severity or fallback.severity,
             probable_causes=probable_causes,
-            evidence=diagnosis.evidence or self._fallback_evidence(trigger),
+            evidence=evidence,
             recommendations=recommendations,
             confidence=diagnosis.confidence if diagnosis.confidence > 0 else fallback.confidence,
             related_objects=related_objects,
@@ -469,9 +500,9 @@ class AgentService:
             impact_summary=diagnosis.impact_summary or correlation.get("impactSummary", {}),
             raw_agent_output=diagnosis.raw_agent_output,
             used_fallback=diagnosis.used_fallback
-            or not diagnosis.summary
-            or not diagnosis.evidence
-            or not diagnosis.recommendations,
+            or not self._has_text_value(diagnosis.summary)
+            or not self._has_text_items(diagnosis.evidence)
+            or not self._has_text_items(diagnosis.recommendations),
         )
 
     def _merge_related_objects(
@@ -881,9 +912,10 @@ class AgentService:
         )
 
     def _fallback_summary(self, trigger: TriggerContext) -> str:
+        workload_name = trigger.workload.name or "workload"
         summary = (
             f"Detected {trigger.symptom} for "
-            f"{trigger.workload.kind}/{trigger.workload.name} in {trigger.workload.namespace}."
+            f"{trigger.workload.kind}/{workload_name} in {trigger.workload.namespace}."
         )
         reason = trigger.raw_signal.get("reason")
         if trigger.source == "event" and reason:
@@ -909,7 +941,7 @@ class AgentService:
         return []
 
     def _fallback_recommendations(self, trigger: TriggerContext, base: list[str]) -> list[str]:
-        recommendations = [str(item).strip() for item in (base or []) if str(item).strip()]
+        recommendations = self._clean_text_list(base)
         message = str(trigger.raw_signal.get("message", "")).lower()
         if trigger.symptom == "Pending":
             hints = ["Review FailedScheduling events for taints, affinity, quota, and resource shortage signals"]
@@ -927,6 +959,8 @@ class AgentService:
             for hint in hints:
                 if hint not in recommendations:
                     recommendations.append(hint)
+        if not recommendations:
+            recommendations.append("Inspect recent workload events and container status to validate the most likely root cause")
         return recommendations
 
     def _fallback_evidence(self, trigger: TriggerContext) -> list[str]:
@@ -1005,6 +1039,26 @@ class AgentService:
     def _is_placeholder_value(self, value: Any) -> bool:
         text = str(value or "").strip().lower()
         return text in {"unknown", "n/a", "na", "none", "null", "<unknown>"}
+
+    def _clean_text_list(self, values: Any) -> list[str]:
+        if not isinstance(values, list):
+            return []
+        cleaned: list[str] = []
+        for item in values:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if self._is_placeholder_value(text):
+                continue
+            cleaned.append(text)
+        return cleaned
+
+    def _has_text_items(self, values: Any) -> bool:
+        return bool(self._clean_text_list(values))
+
+    def _has_text_value(self, value: Any) -> bool:
+        text = str(value or "").strip()
+        return bool(text) and not self._is_placeholder_value(text)
 
     def _trigger_from_report(self, report: dict) -> TriggerContext:
         spec = report.get("spec", {})
