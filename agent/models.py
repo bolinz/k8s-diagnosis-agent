@@ -47,6 +47,9 @@ class DiagnosisResult:
     root_cause_candidates: list[dict[str, Any]] = field(default_factory=list)
     evidence_timeline: list[dict[str, Any]] = field(default_factory=list)
     impact_summary: dict[str, Any] = field(default_factory=dict)
+    quality_score: dict[str, Any] = field(default_factory=dict)
+    uncertainties: list[str] = field(default_factory=list)
+    evidence_attribution: list[dict[str, Any]] = field(default_factory=list)
     raw_agent_output: dict[str, Any] = field(default_factory=dict)
     used_fallback: bool = False
 

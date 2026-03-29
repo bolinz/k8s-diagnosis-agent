@@ -426,6 +426,9 @@ class AgentService:
             "rootCauseCandidates": status.get("rootCauseCandidates", []),
             "evidenceTimeline": status.get("evidenceTimeline", []),
             "impactSummary": status.get("impactSummary", {}),
+            "qualityScore": status.get("qualityScore", {}),
+            "uncertainties": status.get("uncertainties", []),
+            "evidenceAttribution": status.get("evidenceAttribution", []),
             "lastAnalyzedAt": status.get("lastAnalyzedAt", ""),
             "analysisVersion": status.get("analysisVersion", ""),
             "modelInfo": status.get("modelInfo", {}),
@@ -498,6 +501,11 @@ class AgentService:
             evidence_timeline=diagnosis.evidence_timeline
             or correlation.get("evidenceTimeline", []),
             impact_summary=diagnosis.impact_summary or correlation.get("impactSummary", {}),
+            quality_score=diagnosis.quality_score if isinstance(diagnosis.quality_score, dict) else {},
+            uncertainties=self._clean_text_list(diagnosis.uncertainties),
+            evidence_attribution=[
+                item for item in diagnosis.evidence_attribution if isinstance(item, dict)
+            ],
             raw_agent_output=diagnosis.raw_agent_output,
             used_fallback=diagnosis.used_fallback
             or not self._has_text_value(diagnosis.summary)
@@ -777,6 +785,14 @@ class AgentService:
         normalized["evidenceTimeline"] = [
             item
             for item in normalized.get("evidenceTimeline", [])
+            if isinstance(item, dict)
+        ]
+        quality_score = normalized.get("qualityScore")
+        normalized["qualityScore"] = quality_score if isinstance(quality_score, dict) else {}
+        normalized["uncertainties"] = self._clean_text_list(normalized.get("uncertainties"))
+        normalized["evidenceAttribution"] = [
+            item
+            for item in normalized.get("evidenceAttribution", [])
             if isinstance(item, dict)
         ]
         normalized["category"] = (

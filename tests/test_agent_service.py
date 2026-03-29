@@ -986,6 +986,9 @@ def test_formatter_dedupes_report_name_and_targets_report_namespace_shape():
     assert status["rawSignal"]["reason"] == "BackOff"
     assert status["category"] == "runtime"
     assert status["primarySignal"] == "BackOff"
+    assert status["qualityScore"] == {}
+    assert status["uncertainties"] == []
+    assert status["evidenceAttribution"] == []
 
 
 def test_formatter_writes_trace_into_status_model_info():
@@ -1033,6 +1036,9 @@ def test_service_lists_and_reads_reports():
     assert report["rootCauseCandidates"][0]["objectRef"]["kind"] == "Deployment"
     assert report["category"] == "runtime"
     assert report["primarySignal"] == "BackOff"
+    assert report["qualityScore"] == {}
+    assert report["uncertainties"] == []
+    assert report["evidenceAttribution"] == []
     assert service.get_report("missing") is None
 
 
