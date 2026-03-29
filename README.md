@@ -1,6 +1,6 @@
 # k8s-diagnosis-agent
 
-`k8s-diagnosis-agent` is a Kubernetes diagnostics service that detects failure symptoms, stores structured findings as `DiagnosisReport` custom resources, and exposes a minimal UI for operators.
+`k8s-diagnosis-agent` is a Kubernetes diagnostics service for workload incidents. It detects failure symptoms, correlates related objects, stores structured findings as `DiagnosisReport` custom resources, and exposes an operator-facing UI/API.
 
 Latest stable release: `v0.5.2`
 
@@ -20,7 +20,7 @@ Upcoming release preview: `v0.5.3` reliability patch for report integrity + CI/C
 - `agent/triggers/`: scheduler, alert ingress, and event watcher
 - `agent/analyzers/`: deterministic symptom detection and fallback diagnosis
 - `agent/tools/`: read-only Kubernetes tools exposed to the model layer
-- `agent/orchestrator/`: GPT-5-Codex / Responses API interaction
+- `agent/orchestrator/`: model provider orchestration (OpenAI/Ollama), tool-calling loops, fallback handling
 - `agent/reporting/`: `DiagnosisReport` spec/status writing and backfill
 - `agent/ui/`: embedded API and browser UI
 - `deploy/`: base manifests for CRD, RBAC, Deployment, Service, Ingress, and NetworkPolicy
@@ -39,6 +39,15 @@ Current supported symptoms:
 - `OOMKilled`
 - `Pending`
 - `ProbeFailure`
+- `CreateContainerConfigError`
+- `CreateContainerError`
+- `ContainerCannotRun`
+- `FailedMount`
+- `FailedCreatePodSandbox`
+- `Evicted`
+- `ProgressDeadlineExceeded`
+- `ReplicaMismatch`
+- `NodeNotReadyImpact`
 
 ## Quick Start
 
@@ -159,7 +168,7 @@ kubectl set env deployment/k8s-diagnosis-agent -n k8s-diagnosis-system \
 - Read-only operational scope
 - No automatic remediation or write-back to application manifests
 - No persistent database; UI reads directly from `DiagnosisReport` objects
-- Without `OPENAI_API_KEY`, all diagnoses use deterministic fallback output
+- Without `OPENAI_API_KEY`, OpenAI provider cannot run; you can still use model diagnosis via `MODEL_PROVIDER=ollama` when `OLLAMA_MODEL` is configured
 - Tool calls are scope-guarded to the trigger namespace for namespaced APIs
 - In `relaxed` scope mode, namespaced probing is limited to trigger namespace plus explicit allowlist
 
@@ -180,73 +189,22 @@ Latest validated run (2026-03-27) passed on cluster `<redacted-cluster>`, produc
 ## Release and Versioning
 
 - Latest stable release: `v0.5.2`
-- Python package version: `0.5.1`
-- Helm chart version: `0.5.1`
-- GitHub releases are source-first and reference GHCR images plus deployment docs
+- Upcoming release preview: `v0.5.3` ([details](./docs/releases/v0.5.3.md))
+- GitHub releases are source-first and reference GHCR images plus deployment docs.
+- Runtime deployment should prefer immutable image tags: `ghcr.io/bolinz/k8s-diagnosis-agent-app:sha-<full-commit-sha>`.
 
 The current CI/release workflows:
 
-- runs backend and frontend tests (including Playwright e2e) on PRs and pushes
+- runs backend tests, frontend unit tests, and frontend Playwright e2e on PRs and pushes
 - pushes container images on `main` and tag pushes
 - uses Buildx with GitHub Actions cache for image build and push
 - auto-creates GitHub Releases on `v*` tag pushes
 
-`v0.5.3` (planned) focuses on reliability and delivery quality:
+Release notes and history:
 
-- stricter report completeness normalization for sparse/legacy records
-- fallback-safe output guarantees for `summary/evidence/recommendations`
-- CI split for frontend unit/e2e with clearer failure boundaries
-- compile gate in backend CI and run cancellation for superseded branches
-
-`v0.5.2` is a patch release focused on UI density and analysis transparency:
-
-- compact top bar and compact status strip to increase detail viewport
-- wider detail workspace (`30/70`, large screen `24/76`) to reduce frequent scrolling
-- `AI Analysis Session` card with provider/model/fallback visibility and stage progress
-- `Why This Recommendation` section linking recommendations to evidence snippets
-- timeline-switch blank-page fix for legacy reports
-
-See full walkthrough and screenshots: [docs/releases/v0.5.2.md](./docs/releases/v0.5.2.md)
-
-`v0.5.1` is a patch release focused on deployment consistency:
-
-- runtime image now bundles built Workbench frontend assets
-- frontend static files are packaged with `agent.ui` during wheel install
-- `.dockerignore` excludes local frontend build output to avoid stale assets
-
-`v0.5.0` introduced the major UI/operability updates including:
-
-- timeline density strip + focused event navigation
-- grouped event navigator with sorting/collapse and keyboard shortcuts
-- shortcut help panel and persisted timeline group sort preferences
-- stronger frontend CI gating (`vitest + playwright e2e`)
-
-`v0.4.8` introduced the reliability patch for webhook execution flow:
-
-- `POST /alert` now returns immediately with `202` and `requestId`, and diagnosis runs asynchronously
-- new `GET /api/alerts/{requestId}` endpoint to inspect alert task status/result
-- HTTP response writing now handles `BrokenPipeError` and `ConnectionResetError` gracefully to avoid traceback noise when clients disconnect
-
-`v0.4.7` extends controlled autonomous probing and attribution clarity:
-
-- deterministic root-cause candidate scoring with ranking metadata
-- event-storm aggregation + suppression threshold
-- diagnosis trace metadata (`traceId`, tool sequence, fallback reason)
-- improved attribution readability in UI (`Top Root Candidate`, timeline emphasis)
-
-`v0.4.6` is a patch release focused on model output normalization correctness:
-
-- normalize string-valued `probableCauses`, `evidence`, and `recommendations` into single-item lists
-- prevent per-character list corruption when a provider returns plain strings
-- normalize severity aliases (for example `High`) to supported values (`critical|warning|info`)
-
-`v0.4.5` expanded diagnosis breadth for workload operations and improved operator-facing signals:
-
-- scheduler and mount fallback refinement (`FailedScheduling` and `FailedMount` subtypes)
-- image-pull subtype refinement (auth vs not-found vs network)
-- new read-only tools: `get_namespace_events` and `get_node_events`
-- report/API/UI enrichment with `category` and `primarySignal`
-- minimal runtime metrics exposed via `/metrics`
+- `v0.5.2` walkthrough and screenshots: [docs/releases/v0.5.2.md](./docs/releases/v0.5.2.md)
+- `v0.5.3` planned changes: [docs/releases/v0.5.3.md](./docs/releases/v0.5.3.md)
+- full version history: [CHANGELOG.md](./CHANGELOG.md)
 
 ## Contributing and License
 
