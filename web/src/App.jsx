@@ -482,6 +482,7 @@ export default function App() {
   const [activeTimelineEventSignature, setActiveTimelineEventSignature] = useState("");
   const [activeTimelineEvent, setActiveTimelineEvent] = useState(null);
   const symptomInputRef = useRef(null);
+  const detailCacheRef = useRef(new Map());
 
   async function loadReports() {
     const started = performance?.now ? performance.now() : Date.now();
@@ -502,14 +503,27 @@ export default function App() {
       });
       if (items.length > 0) {
         const hasSelected = selectedName && items.some((x) => x.name === selectedName);
+        if (!hasSelected && selectedName) {
+          const cached = detailCacheRef.current.get(selectedName);
+          if (cached) {
+            setSelectedDetail(cached);
+            setListError("");
+            return;
+          }
+        }
         const nextName = hasSelected ? selectedName : items[0].name;
         if (nextName && nextName !== selectedName) {
           setSelectedName(nextName);
           void loadDetail(nextName);
         }
       } else {
-        setSelectedName("");
-        setSelectedDetail(null);
+        const cached = selectedName ? detailCacheRef.current.get(selectedName) : null;
+        if (cached) {
+          setSelectedDetail(cached);
+        } else {
+          setSelectedName("");
+          setSelectedDetail(null);
+        }
       }
     } catch (err) {
       const msg = String(err?.message || err);
@@ -536,11 +550,20 @@ export default function App() {
       if (!resp.ok) throw new Error(`detail failed (${resp.status})`);
       const detail = await resp.json();
       setSelectedDetail(detail);
+      detailCacheRef.current.set(name, detail);
       const elapsed = (performance?.now ? performance.now() : Date.now()) - started;
       setDetailLatencyMs(Math.max(0, Math.round(elapsed)));
     } catch (err) {
-      const fallback = reports.find((x) => x.name === name) || null;
+      const fallback =
+        reports.find((x) => x.name === name) ||
+        detailCacheRef.current.get(name) ||
+        (selectedDetail && selectedDetail.name === name ? selectedDetail : null) ||
+        selectedDetail ||
+        null;
       setSelectedDetail(fallback);
+      if (fallback) {
+        detailCacheRef.current.set(name, fallback);
+      }
       const msg = String(err?.message || err);
       setDetailError(msg);
       setApiLastError(msg);
@@ -687,7 +710,7 @@ export default function App() {
     () => reports.find((x) => x.name === selectedName) || null,
     [reports, selectedName],
   );
-  const selected = selectedDetail && selectedDetail.name === selectedName ? selectedDetail : selectedFromList;
+  const selected = selectedDetail && (selectedDetail.name === selectedName || !selectedFromList) ? selectedDetail : selectedFromList;
   const selectedRecommendations = asList(selected?.recommendations);
   const selectedEvidence = asList(selected?.evidence);
   const selectedCauses = asList(selected?.probableCauses);
@@ -1053,6 +1076,8 @@ export default function App() {
               aria-current={selectedName === r.name ? "true" : "false"}
               onClick={() => {
                 setSelectedName(r.name);
+                setSelectedDetail(r);
+                detailCacheRef.current.set(r.name, r);
                 void loadDetail(r.name);
               }}
             >

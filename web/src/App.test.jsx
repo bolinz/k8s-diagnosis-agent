@@ -47,6 +47,38 @@ describe("App", () => {
     });
   });
 
+  it("keeps detail visible when an old report detail request fails", async () => {
+    const listPayload = {
+      items: [
+        {
+          name: "legacy-r1",
+          namespace: "default",
+          severity: "critical",
+          symptom: "ImagePullBackOff",
+          summary: "legacy summary",
+          workload: { kind: "Pod", name: "unknown" },
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input) => {
+        const url = String(input);
+        if (url.includes("/api/reports/legacy-r1")) {
+          return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+        }
+        if (url.includes("/api/reports")) return okJson(listPayload);
+        return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+      }),
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Pod/unknown" })).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Detail fetch failed/i)).toBeInTheDocument();
+    expect(screen.getByText("legacy summary")).toBeInTheDocument();
+  });
+
   it("renders detail with key signals, top candidate and timeline emphasis", async () => {
     const listPayload = {
       items: [
