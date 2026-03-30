@@ -14,6 +14,7 @@
 
 - [Complex failure end-to-end scenario](./testing/complex-failure-e2e.md)
 - [v0.6.0 Day 4 UI validation](./testing/v0.6.0-day4-ui.md)
+- [v0.6.0 Day 5 cluster validation](./testing/v0.6.0-day5-cluster-validation.md)
 
 ## Visual Assets
 
