@@ -56,6 +56,11 @@ def _is_nonempty_text_list(value: Any) -> bool:
 def _validate_v060(report: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     status = report.get("status", {})
+    analysis_version = str(status.get("analysisVersion", "")).strip()
+    if not analysis_version:
+        errors.append("status.analysisVersion is missing")
+    elif not analysis_version.startswith("0.6."):
+        errors.append(f"status.analysisVersion is not v0.6.x (actual: {analysis_version})")
 
     quality = status.get("qualityScore")
     if not isinstance(quality, dict) or not quality:
