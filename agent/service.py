@@ -1235,6 +1235,20 @@ class AgentService:
                     event_item["time"] = timestamp
                 items.append(event_item)
 
+        if not items:
+            fallback_item: dict[str, Any] = {
+                "source": "fallback" if diagnosis.used_fallback else "trigger",
+                "signal": trigger.symptom or "diagnosis",
+                "objectRef": {
+                    "kind": trigger.workload.kind,
+                    "namespace": trigger.workload.namespace,
+                    "name": trigger.workload.name,
+                },
+            }
+            if diagnosis.used_fallback:
+                fallback_item["reason"] = "No tool/timeline evidence available; using minimal trigger attribution."
+            items.append(fallback_item)
+
         return self._dedupe_evidence_attribution(items)
 
     def _dedupe_evidence_attribution(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
