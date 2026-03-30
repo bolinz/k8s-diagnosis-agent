@@ -1474,6 +1474,37 @@ def test_service_builds_evidence_attribution_from_trace_timeline_and_event_signa
     assert any(item.get("source") == "trigger" and item.get("reason") == "BackOff" for item in attribution)
 
 
+def test_service_builds_minimal_fallback_attribution_when_no_signals_exist():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Deployment", namespace="payments", name="checkout"),
+        symptom="ReplicaMismatch",
+        observed_for_seconds=1200,
+    )
+    diagnosis = DiagnosisResult(
+        summary="Diagnosis incomplete",
+        severity="warning",
+        probable_causes=[],
+        evidence=[],
+        recommendations=[],
+        confidence=0.0,
+        used_fallback=True,
+        evidence_timeline=[],
+        raw_agent_output={"trace": {"traceId": "trace-empty", "toolSequence": []}},
+    )
+    normalized = service._ensure_complete_diagnosis(trigger, diagnosis)
+    attribution = normalized.evidence_attribution
+    assert attribution
+    assert attribution[0].get("source") == "fallback"
+    assert attribution[0].get("signal") == "ReplicaMismatch"
+
+
 def test_service_merges_related_objects_with_correlation_context():
     service = AgentService(
         settings=build_settings(),
