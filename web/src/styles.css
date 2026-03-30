@@ -633,6 +633,50 @@ body {
   font-size: 12px;
 }
 
+.quality-overview {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  row-gap: 4px;
+  column-gap: 8px;
+  margin-bottom: 8px;
+}
+
+.quality-overview span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quality-overview strong {
+  font-size: 12px;
+}
+
+.quality-dimensions {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.quality-dimension-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.quality-dimension-row span {
+  color: #475569;
+}
+
+.quality-dimension-row strong {
+  color: #0f172a;
+}
+
+.attribution-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .panel-controls {
   display: flex;
   justify-content: flex-end;

@@ -111,6 +111,23 @@ describe("App", () => {
       recommendations: ["Check PVC binding"],
       probableCauses: ["PVC unbound"],
       evidence: ["FailedScheduling with unbound PVC"],
+      qualityScore: {
+        overall: 0.83,
+        method: "rule-v1",
+        usedFallback: false,
+        dimensions: {
+          evidenceCoverage: 0.9,
+          recommendationActionability: 0.8,
+          rootCauseStrength: 0.75,
+          correlationStrength: 0.7,
+          confidenceAlignment: 0.95,
+        },
+      },
+      uncertainties: ["Evidence window is narrow for namespace diag-e2e."],
+      evidenceAttribution: [
+        { source: "tool", tool: "get_pod_events", signal: "Tool get_pod_events executed" },
+        { source: "timeline", signal: "FailedMount", time: "2026-03-28T02:21:10+00:00" },
+      ],
       rawSignal: {
         reason: "FailedMount",
         message: "Unable to attach or mount volumes",
@@ -154,6 +171,13 @@ describe("App", () => {
     expect(screen.getByText("Root Cause Candidates")).toBeInTheDocument();
     expect(screen.getByText("AI Analysis Session")).toBeInTheDocument();
     expect(screen.getByText(/Provider/i)).toBeInTheDocument();
+    expect(screen.getByText("Diagnosis Quality")).toBeInTheDocument();
+    expect(screen.getByText("Uncertainties")).toBeInTheDocument();
+    expect(screen.getByText("Evidence Attribution")).toBeInTheDocument();
+    expect(screen.getByText("83%")).toBeInTheDocument();
+    expect(screen.getByText("rule-v1")).toBeInTheDocument();
+    expect(screen.getByText(/Evidence window is narrow/i)).toBeInTheDocument();
+    expect(screen.getByText(/tool=get_pod_events/i)).toBeInTheDocument();
     expect(screen.getByText("Why This Recommendation")).toBeInTheDocument();
     expect(screen.getByLabelText("auto-refresh")).toBeChecked();
     expect(screen.getByRole("combobox", { name: "refresh-interval" })).toHaveValue("15");
