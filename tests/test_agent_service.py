@@ -1425,6 +1425,55 @@ def test_service_quality_score_penalizes_fallback_outputs():
     assert any("fallback" in item.lower() for item in normalized.uncertainties)
 
 
+def test_service_builds_evidence_attribution_from_trace_timeline_and_event_signal():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    trigger = TriggerContext(
+        source="event",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="CrashLoopBackOff",
+        observed_for_seconds=600,
+        raw_signal={
+            "reason": "BackOff",
+            "message": "Back-off restarting failed container",
+            "timestamp": "2026-03-22T05:00:00+00:00",
+        },
+    )
+    diagnosis = DiagnosisResult(
+        summary="Container keeps restarting.",
+        severity="critical",
+        probable_causes=["Startup configuration missing."],
+        evidence=["BackOff events observed repeatedly.", "Recent logs show config exception."],
+        recommendations=["Restore missing config and redeploy.", "Verify startup env references."],
+        confidence=0.82,
+        evidence_timeline=[
+            {
+                "time": "2026-03-22T05:00:00+00:00",
+                "objectRef": {"kind": "Pod", "namespace": "payments", "name": "checkout-abc"},
+                "signal": "BackOff",
+            }
+        ],
+        raw_agent_output={
+            "trace": {
+                "traceId": "trace-abc",
+                "toolSequence": [
+                    {"name": "get_pod_events", "durationMs": 12, "scopeGuardHit": False},
+                    {"name": "get_recent_logs", "durationMs": 19, "scopeGuardHit": False},
+                ],
+            }
+        },
+    )
+    normalized = service._ensure_complete_diagnosis(trigger, diagnosis)
+    attribution = normalized.evidence_attribution
+    assert any(item.get("source") == "tool" and item.get("tool") == "get_pod_events" for item in attribution)
+    assert any(item.get("source") == "timeline" and item.get("signal") == "BackOff" for item in attribution)
+    assert any(item.get("source") == "trigger" and item.get("reason") == "BackOff" for item in attribution)
+
+
 def test_service_merges_related_objects_with_correlation_context():
     service = AgentService(
         settings=build_settings(),

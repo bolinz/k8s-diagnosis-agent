@@ -510,6 +510,12 @@ class AgentService:
             confidence=diagnosis.confidence if diagnosis.confidence > 0 else fallback.confidence,
             used_fallback=used_fallback,
         )
+        evidence_timeline = diagnosis.evidence_timeline or correlation.get("evidenceTimeline", [])
+        evidence_attribution = self._build_evidence_attribution(
+            trigger=trigger,
+            diagnosis=diagnosis,
+            evidence_timeline=[item for item in evidence_timeline if isinstance(item, dict)],
+        )
         return DiagnosisResult(
             summary=summary,
             severity=diagnosis.severity or fallback.severity,
@@ -519,14 +525,11 @@ class AgentService:
             confidence=diagnosis.confidence if diagnosis.confidence > 0 else fallback.confidence,
             related_objects=related_objects,
             root_cause_candidates=root_candidates,
-            evidence_timeline=diagnosis.evidence_timeline
-            or correlation.get("evidenceTimeline", []),
+            evidence_timeline=evidence_timeline,
             impact_summary=diagnosis.impact_summary or correlation.get("impactSummary", {}),
             quality_score=quality_score,
             uncertainties=uncertainties,
-            evidence_attribution=[
-                item for item in diagnosis.evidence_attribution if isinstance(item, dict)
-            ],
+            evidence_attribution=evidence_attribution,
             raw_agent_output=diagnosis.raw_agent_output,
             used_fallback=used_fallback,
         )
@@ -1161,6 +1164,128 @@ class AgentService:
         if value > 1:
             return 1.0
         return float(value)
+
+    def _build_evidence_attribution(
+        self,
+        *,
+        trigger: TriggerContext,
+        diagnosis: DiagnosisResult,
+        evidence_timeline: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for entry in diagnosis.evidence_attribution:
+            if isinstance(entry, dict):
+                items.append(dict(entry))
+
+        trace = diagnosis.raw_agent_output.get("trace", {}) if isinstance(diagnosis.raw_agent_output, dict) else {}
+        tool_sequence = trace.get("toolSequence", []) if isinstance(trace, dict) else []
+        for index, call in enumerate(tool_sequence, start=1):
+            if not isinstance(call, dict):
+                continue
+            tool_name = str(call.get("name", "")).strip()
+            if not tool_name:
+                continue
+            items.append(
+                {
+                    "source": "tool",
+                    "tool": tool_name,
+                    "signal": f"Tool {tool_name} executed",
+                    "sequence": index,
+                    "durationMs": int(call.get("durationMs", 0) or 0),
+                    "scopeGuardHit": bool(call.get("scopeGuardHit", False)),
+                }
+            )
+
+        for point in evidence_timeline[:8]:
+            signal = str(point.get("signal", "")).strip()
+            if not signal:
+                continue
+            attribution: dict[str, Any] = {
+                "source": "timeline",
+                "signal": signal,
+            }
+            timestamp = str(point.get("time", "")).strip()
+            if timestamp:
+                attribution["time"] = timestamp
+            object_ref = self._normalize_object_ref(point.get("objectRef", {}))
+            if object_ref:
+                attribution["objectRef"] = object_ref
+            items.append(attribution)
+
+        if trigger.source == "event":
+            reason = str(trigger.raw_signal.get("reason", "")).strip()
+            message = str(trigger.raw_signal.get("message", "")).strip()
+            timestamp = str(trigger.raw_signal.get("timestamp", "")).strip()
+            signal = reason or message
+            if signal:
+                event_item: dict[str, Any] = {
+                    "source": "trigger",
+                    "signal": signal,
+                    "objectRef": {
+                        "kind": trigger.workload.kind,
+                        "namespace": trigger.workload.namespace,
+                        "name": trigger.workload.name,
+                    },
+                }
+                if reason:
+                    event_item["reason"] = reason
+                if message:
+                    event_item["message"] = message
+                if timestamp:
+                    event_item["time"] = timestamp
+                items.append(event_item)
+
+        return self._dedupe_evidence_attribution(items)
+
+    def _dedupe_evidence_attribution(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[tuple[str, str, str, str, str, str]] = set()
+        deduped: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            source = str(item.get("source", "")).strip()
+            signal = str(item.get("signal", "")).strip()
+            tool = str(item.get("tool", "")).strip()
+            timestamp = str(item.get("time", "")).strip()
+            object_ref = self._normalize_object_ref(item.get("objectRef", {}))
+            key = (
+                source,
+                tool,
+                signal,
+                timestamp,
+                object_ref.get("kind", ""),
+                object_ref.get("name", ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized = dict(item)
+            if source:
+                normalized["source"] = source
+            if signal:
+                normalized["signal"] = signal
+            if tool:
+                normalized["tool"] = tool
+            if timestamp:
+                normalized["time"] = timestamp
+            if object_ref:
+                normalized["objectRef"] = object_ref
+            deduped.append(normalized)
+        return deduped
+
+    def _normalize_object_ref(self, value: Any) -> dict[str, str]:
+        if not isinstance(value, dict):
+            return {}
+        kind = str(value.get("kind", "")).strip()
+        name = str(value.get("name", "")).strip()
+        namespace = str(value.get("namespace", "")).strip()
+        if not kind or not name:
+            return {}
+        return {
+            "kind": kind,
+            "namespace": namespace,
+            "name": name,
+        }
 
     def _trigger_from_report(self, report: dict) -> TriggerContext:
         spec = report.get("spec", {})
