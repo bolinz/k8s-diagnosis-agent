@@ -1326,6 +1326,103 @@ def test_service_fills_empty_diagnosis_fields_from_fallback():
     assert diagnosis.summary.startswith("Detected CrashLoopBackOff")
     assert diagnosis.evidence
     assert diagnosis.recommendations
+    assert diagnosis.quality_score.get("overall", 0) > 0
+    assert diagnosis.quality_score.get("usedFallback") is True
+    assert diagnosis.uncertainties
+    assert any("fallback" in item.lower() for item in diagnosis.uncertainties)
+
+
+def test_service_quality_score_prefers_richer_evidence_and_correlation():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    trigger = TriggerContext(
+        source="event",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="CrashLoopBackOff",
+        observed_for_seconds=900,
+        raw_signal={
+            "eventType": "Warning",
+            "reason": "BackOff",
+            "message": "Back-off restarting failed container",
+            "timestamp": "2026-03-22T05:00:00+00:00",
+        },
+        correlation_context={
+            "relatedObjects": [
+                {"kind": "Pod", "namespace": "payments", "name": "checkout-abc", "role": "primary"},
+                {"kind": "Deployment", "namespace": "payments", "name": "checkout", "role": "owner"},
+            ]
+        },
+    )
+    diagnosis = DiagnosisResult(
+        summary="Container exits quickly after startup.",
+        severity="critical",
+        probable_causes=["App boot config error."],
+        evidence=[
+            "Container status shows CrashLoopBackOff waiting reason.",
+            "Pod event reason BackOff repeats every 30s.",
+            "Recent logs contain startup configuration exception.",
+        ],
+        recommendations=[
+            "Fix app startup configuration and redeploy.",
+            "Validate required env and secret references before rollout.",
+        ],
+        confidence=0.9,
+        related_objects=[
+            {"kind": "Pod", "namespace": "payments", "name": "checkout-abc", "role": "primary"},
+            {"kind": "Deployment", "namespace": "payments", "name": "checkout", "role": "owner"},
+        ],
+        root_cause_candidates=[
+            {
+                "objectRef": {"kind": "Deployment", "namespace": "payments", "name": "checkout"},
+                "reason": "Deployment template references invalid startup configuration.",
+                "confidence": 0.86,
+            }
+        ],
+    )
+    normalized = service._ensure_complete_diagnosis(trigger, diagnosis)
+    quality = normalized.quality_score
+    assert quality["usedFallback"] is False
+    assert quality["method"] == "rule-v1"
+    assert quality["overall"] >= 0.7
+    assert quality["dimensions"]["evidenceCoverage"] == 1.0
+    assert quality["dimensions"]["recommendationActionability"] == 1.0
+    assert quality["dimensions"]["confidenceAlignment"] >= 0.9
+    assert normalized.uncertainties == []
+
+
+def test_service_quality_score_penalizes_fallback_outputs():
+    service = AgentService(
+        settings=build_settings(),
+        client=FakeKubernetesClient(),
+        codex_agent=build_fallback_agent(),
+    )
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="prod",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=900,
+    )
+    weak = DiagnosisResult(
+        summary="Diagnosis incomplete",
+        severity="warning",
+        probable_causes=[],
+        evidence=[],
+        recommendations=[],
+        confidence=0.0,
+    )
+    normalized = service._ensure_complete_diagnosis(trigger, weak)
+    quality = normalized.quality_score
+    assert quality["usedFallback"] is True
+    assert 0.0 <= quality["overall"] <= 0.65
+    assert quality["dimensions"]["evidenceCoverage"] >= 0.3
+    assert quality["dimensions"]["recommendationActionability"] >= 0.5
+    assert normalized.uncertainties
+    assert any("fallback" in item.lower() for item in normalized.uncertainties)
 
 
 def test_service_merges_related_objects_with_correlation_context():
