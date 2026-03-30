@@ -130,6 +130,18 @@ spec:
                 impactSummary:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+                qualityScore:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                uncertainties:
+                  type: array
+                  items:
+                    type: string
+                evidenceAttribution:
+                  type: array
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
                 analysisVersion:
                   type: string
                 modelInfo:

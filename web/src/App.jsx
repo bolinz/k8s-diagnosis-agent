@@ -201,6 +201,13 @@ function confidenceLevel(value) {
   return "low";
 }
 
+function formatRatio(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  const bounded = Math.max(0, Math.min(1, n));
+  return `${Math.round(bounded * 100)}%`;
+}
+
 function keywords(text) {
   return new Set(
     String(text || "")
@@ -907,6 +914,21 @@ export default function App() {
         : "-";
   const confidenceValue = normalizeConfidence(selected?.confidence);
   const confidenceLabel = confidenceLevel(selected?.confidence);
+  const qualityScore = selected?.qualityScore && typeof selected.qualityScore === "object" ? selected.qualityScore : {};
+  const qualityOverall = normalizeConfidence(qualityScore.overall);
+  const qualityDimensions =
+    qualityScore.dimensions && typeof qualityScore.dimensions === "object" ? qualityScore.dimensions : {};
+  const qualityDimensionRows = [
+    ["Evidence Coverage", qualityDimensions.evidenceCoverage],
+    ["Recommendation Actionability", qualityDimensions.recommendationActionability],
+    ["Root Cause Strength", qualityDimensions.rootCauseStrength],
+    ["Correlation Strength", qualityDimensions.correlationStrength],
+    ["Confidence Alignment", qualityDimensions.confidenceAlignment],
+  ].filter(([, value]) => Number.isFinite(Number(value)));
+  const uncertaintyItems = asList(selected?.uncertainties);
+  const evidenceAttribution = Array.isArray(selected?.evidenceAttribution)
+    ? selected.evidenceAttribution.filter((x) => x && typeof x === "object")
+    : [];
   const recommendationLinks = useMemo(
     () => recommendationEvidenceMap(selectedRecommendations, selectedEvidence, keySignals),
     [selectedRecommendations, selectedEvidence, keySignals],
@@ -922,9 +944,15 @@ export default function App() {
     ];
   }, [keySignals, selected, displayedRelatedObjects.length, rootCandidates.length, orderedVisibleTimelineEvents.length, selectedRecommendations.length]);
   const hasOverviewContent =
-    keySignals.length > 0 || selectedRecommendations.length > 0 || selectedCauses.length > 0 || selectedEvidence.length > 0;
+    keySignals.length > 0
+    || selectedRecommendations.length > 0
+    || selectedCauses.length > 0
+    || selectedEvidence.length > 0
+    || qualityDimensionRows.length > 0
+    || qualityOverall !== null
+    || uncertaintyItems.length > 0;
   const hasAttributionContent =
-    displayedRelatedObjects.length > 0 || !!topRootCandidate || rootCandidates.length > 0;
+    displayedRelatedObjects.length > 0 || !!topRootCandidate || rootCandidates.length > 0 || evidenceAttribution.length > 0;
   const hasTimelineContent =
     orderedVisibleTimelineEvents.length > 0 || !!activeTimelineEvent;
 
@@ -1351,6 +1379,36 @@ export default function App() {
                   {selectedEvidence.length === 0 ? <div className="empty">No evidence.</div> : null}
                   <ul>{selectedEvidence.map((x) => <li key={x}>{x}</li>)}</ul>
                 </section>
+
+                <section className="card">
+                  <h3>Diagnosis Quality</h3>
+                  <div className="quality-overview">
+                    <span>Overall</span>
+                    <strong>{qualityOverall === null ? "-" : formatRatio(qualityOverall)}</strong>
+                    <span>Method</span>
+                    <strong>{qualityScore.method || "-"}</strong>
+                    <span>Fallback Scoring</span>
+                    <strong>{qualityScore.usedFallback === true ? "yes" : qualityScore.usedFallback === false ? "no" : "-"}</strong>
+                  </div>
+                  {qualityDimensionRows.length > 0 ? (
+                    <div className="quality-dimensions">
+                      {qualityDimensionRows.map(([label, value]) => (
+                        <div key={label} className="quality-dimension-row">
+                          <span>{label}</span>
+                          <strong>{formatRatio(value)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty">No quality dimension scores.</div>
+                  )}
+                </section>
+
+                <section className="card">
+                  <h3>Uncertainties</h3>
+                  {uncertaintyItems.length === 0 ? <div className="empty">No explicit uncertainties.</div> : null}
+                  <ul>{uncertaintyItems.map((x, idx) => <li key={`${x}-${idx}`}>{x}</li>)}</ul>
+                </section>
               </div>
               ) : null}
 
@@ -1432,6 +1490,34 @@ export default function App() {
                     </li>
                   ))}
                 </ul>
+              </section>
+              ) : null}
+
+              {detailView === "all" || detailView === "attribution" ? (
+              <section className="card">
+                <h3>Evidence Attribution</h3>
+                {evidenceAttribution.length === 0 ? <div className="empty">No evidence attribution records.</div> : null}
+                {evidenceAttribution.length > 0 ? (
+                  <ul className="attribution-list">
+                    {evidenceAttribution.map((item, idx) => {
+                      const source = item.source ? String(item.source) : "source";
+                      const signal = item.signal ? String(item.signal) : "";
+                      const tool = item.tool ? `tool=${item.tool}` : "";
+                      const object = objectRefLabel(item.objectRef);
+                      const time = item.time ? formatAt(item.time, timezone) : "";
+                      const extra = [tool, object ? `object=${object}` : "", time ? `time=${time}` : ""]
+                        .filter(Boolean)
+                        .join(" · ");
+                      return (
+                        <li key={`${source}-${signal}-${idx}`}>
+                          <strong>{source}</strong>
+                          {signal ? `: ${signal}` : ""}
+                          {extra ? <div className="hint">{extra}</div> : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
               </section>
               ) : null}
 

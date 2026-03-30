@@ -10,6 +10,7 @@ It detects symptoms, correlates related objects, writes `DiagnosisReport` CRs, a
 
 - Scheduled scan + cluster-wide warning-event watch + alert webhook (`POST /alert`)
 - Cross-object correlation (`relatedObjects`, `rootCauseCandidates`, `evidenceTimeline`, `impactSummary`)
+- Explainability outputs (`qualityScore`, `uncertainties`, `evidenceAttribution`) surfaced in report detail UI
 - Model provider runtime (`MODEL_PROVIDER=openai|ollama`) with fallback-safe output
 - Embedded Workbench UI and JSON API (`/api/reports`, `/api/reports/{name}`)
 - CI with backend tests + frontend unit + Playwright e2e + GHCR image publish
