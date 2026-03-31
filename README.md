@@ -4,7 +4,7 @@
 It detects symptoms, correlates related objects, writes `DiagnosisReport` CRs, and exposes a built-in UI/API for operators.
 
 - Latest stable: `v0.5.2`
-- Next patch: `v0.5.3` ([release draft](./docs/releases/v0.5.3.md))
+- Next release: `v0.6.0` ([release checklist](./docs/releases/v0.6.0.md))
 
 ## Core Capabilities
 
