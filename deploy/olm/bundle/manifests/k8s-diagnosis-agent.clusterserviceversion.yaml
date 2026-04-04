@@ -1,0 +1,289 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  name: k8s-diagnosis-agent.v0.7.0
+  namespace: placeholder
+  labels:
+    operators.coreos.com/k8s-diagnosis-agent.k8s-diagnosis-system: ""
+spec:
+  displayName: Kubernetes Diagnosis Agent
+  description: |
+    Read-only Kubernetes workload diagnostics service that uses AI models to detect,
+    correlate, and diagnose workload issues. Writes structured DiagnosisReport CRs and
+    exposes a built-in Workbench UI and JSON API.
+
+    ## Features
+    - Scheduled scan + cluster event watch + alert webhook processing
+    - AI-powered diagnosis with OpenAI GPT-5-Codex or Ollama local models
+    - Structured DiagnosisReport CRDs with explainability (quality scores, uncertainties, evidence attribution)
+    - Embedded Workbench UI for reviewing reports
+    - Batch diagnosis aggregation for namespace-wide issues
+    - OLM operator lifecycle management ready
+
+    ## Supported Symptom Types
+    CrashLoopBackOff, ImagePullBackOff, ErrImagePull, OOMKilled, Pending,
+    ProbeFailure, CreateContainerConfigError, CreateContainerError, ContainerCannotRun,
+    FailedMount, FailedCreatePodSandbox, Evicted, ProgressDeadlineExceeded,
+    ReplicaMismatch, PVCPending, VolumeResizeFailure, NetworkPolicyBlocking,
+    HPAMaxReplicas, ResourceQuotaExceeded, PDBDisruptionBlocked
+  version: 0.7.0
+  maturity: alpha
+  minKubeVersion: "1.29"
+  provider:
+    name: bolinz
+  maintainers:
+    - name: bolinz
+      email: ""
+  links:
+    - name: Documentation
+      url: https://github.com/bolinz/k8s-diagnosis-agent
+  icon:
+    - base64data: ""
+      mediatype: image/svg+xml
+  keywords:
+    - kubernetes
+    - diagnosis
+    - ai
+    - ops
+    - workload
+    - debugging
+  selector:
+    matchLabels:
+      app: k8s-diagnosis-agent
+  installModes:
+    - type: OwnNamespace
+      supported: true
+    - type: MultiNamespace
+      supported: true
+    - type: AllNamespaces
+      supported: false
+    - type: SingleNamespace
+      supported: true
+  customResourceDefinitions:
+    - displayedName: DiagnosisReport
+      description: Structured diagnosis report for Kubernetes workload issues
+      kind: DiagnosisReport
+      name: diagnosisreports.ops.ai.yourorg
+      version: v1alpha1
+      resources:
+        - kind: Deployment
+          name: k8s-diagnosis-agent
+          version: v1
+        - kind: Service
+          name: k8s-diagnosis-agent
+          version: v1
+        - kind: ServiceAccount
+          name: k8s-diagnosis-agent
+          version: v1
+      descriptor:
+        description: |
+          Represents the result of a workload diagnosis including summary,
+          probable causes, evidence, recommendations, root cause candidates,
+          quality score, uncertainties, and evidence attribution.
+        specDescriptors:
+          - description: Cluster name
+            displayName: Cluster
+            path: cluster
+            x-descriptors:
+              - plainText
+          - description: Namespace
+            displayName: Namespace
+            path: namespace
+            x-descriptors:
+              - plainText
+          - description: Workload reference
+            displayName: Workload
+            path: workloadRef
+            x-descriptors:
+              - core/reference
+          - description: Symptom type
+            displayName: Symptom
+            path: symptom
+            x-descriptors:
+              - plainText
+          - description: Observation time in seconds
+            displayName: Observed For (s)
+            path: observedFor
+            x-descriptors:
+              - plainText
+        statusDescriptors:
+          - description: Report phase
+            displayName: Phase
+            path: phase
+            x-descriptors:
+              - plainText
+          - description: Severity level
+            displayName: Severity
+            path: severity
+            x-descriptors:
+              - plainText
+          - description: Summary of the diagnosis
+            displayName: Summary
+            path: summary
+            x-descriptors:
+              - plainText
+          - description: When the report was last analyzed
+            displayName: Last Analyzed At
+            path: lastAnalyzedAt
+            x-descriptors:
+              - plainText
+  permissions:
+    - serviceAccountName: k8s-diagnosis-agent
+      rules:
+        - apiGroups: [""]
+          resources: ["pods", "pods/log", "events", "nodes", "namespaces", "resourcequotas", "persistentvolumeclaims"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["apps"]
+          resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["autoscaling"]
+          resources: ["horizontalpodautoscalers"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["policy"]
+          resources: ["poddisruptionbudgets"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["ops.ai.yourorg"]
+          resources: ["diagnosisreports"]
+          verbs: ["get", "list", "watch", "create", "patch", "update"]
+        - apiGroups: ["ops.ai.yourorg"]
+          resources: ["diagnosisreports/status"]
+          verbs: ["get", "patch", "update"]
+  clusterPermissions:
+    - serviceAccountName: k8s-diagnosis-agent
+      rules:
+        - apiGroups: [""]
+          resources: ["pods", "pods/log", "events", "nodes", "namespaces", "resourcequotas", "persistentvolumeclaims"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["apps"]
+          resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["autoscaling"]
+          resources: ["horizontalpodautoscalers"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["policy"]
+          resources: ["poddisruptionbudgets"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["ops.ai.yourorg"]
+          resources: ["diagnosisreports"]
+          verbs: ["get", "list", "watch", "create", "patch", "update"]
+        - apiGroups: ["ops.ai.yourorg"]
+          resources: ["diagnosisreports/status"]
+          verbs: ["get", "patch", "update"]
+  install:
+    strategy: deployment
+    spec:
+      permissions:
+        - serviceAccountName: k8s-diagnosis-agent
+          rules:
+            - apiGroups: [""]
+              resources: ["pods", "pods/log", "events", "nodes", "namespaces", "resourcequotas", "persistentvolumeclaims"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["apps"]
+              resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["autoscaling"]
+              resources: ["horizontalpodautoscalers"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["policy"]
+              resources: ["poddisruptionbudgets"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["ops.ai.yourorg"]
+              resources: ["diagnosisreports"]
+              verbs: ["get", "list", "watch", "create", "patch", "update"]
+            - apiGroups: ["ops.ai.yourorg"]
+              resources: ["diagnosisreports/status"]
+              verbs: ["get", "patch", "update"]
+      clusterPermissions:
+        - serviceAccountName: k8s-diagnosis-agent
+          rules:
+            - apiGroups: [""]
+              resources: ["pods", "pods/log", "events", "nodes", "namespaces", "resourcequotas", "persistentvolumeclaims"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["apps"]
+              resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["autoscaling"]
+              resources: ["horizontalpodautoscalers"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["policy"]
+              resources: ["poddisruptionbudgets"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["ops.ai.yourorg"]
+              resources: ["diagnosisreports"]
+              verbs: ["get", "list", "watch", "create", "patch", "update"]
+            - apiGroups: ["ops.ai.yourorg"]
+              resources: ["diagnosisreports/status"]
+              verbs: ["get", "patch", "update"]
+      deployments:
+        - name: k8s-diagnosis-agent
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: k8s-diagnosis-agent
+            template:
+              metadata:
+                labels:
+                  app: k8s-diagnosis-agent
+              spec:
+                serviceAccountName: k8s-diagnosis-agent
+                securityContext:
+                  seccompProfile:
+                    type: RuntimeDefault
+                containers:
+                  - name: agent
+                    image: ghcr.io/bolinz/k8s-diagnosis-agent-app:v0.7.0
+                    imagePullPolicy: Always
+                    args: ["run"]
+                    ports:
+                      - containerPort: 8080
+                        name: http
+                    env:
+                      - name: MODEL_PROVIDER
+                        value: openai
+                      - name: OPENAI_MODEL
+                        value: gpt-5-codex
+                      - name: OLLAMA_BASE_URL
+                        value: http://ollama:11434
+                      - name: OLLAMA_MODEL
+                        value: ""
+                      - name: LOG_LEVEL
+                        value: INFO
+                      - name: K8S_DIAGNOSIS_REQUEST_TIMEOUT_SECONDS
+                        value: "45"
+                    envFrom:
+                      - secretRef:
+                          name: k8s-diagnosis-agent-secrets
+                          optional: true
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      runAsNonRoot: true
+                      runAsUser: 65532
+                      capabilities:
+                        drop: ["ALL"]
+                    readinessProbe:
+                      httpGet:
+                        path: /healthz/ready
+                        port: 8080
+                      initialDelaySeconds: 10
+                      periodSeconds: 10
+                      failureThreshold: 3
+                    livenessProbe:
+                      httpGet:
+                        path: /healthz/live
+                        port: 8080
+                      initialDelaySeconds: 30
+                      periodSeconds: 30
+                      failureThreshold: 3
+                    startupProbe:
+                      httpGet:
+                        path: /healthz/startup
+                        port: 8080
+                      initialDelaySeconds: 5
+                      periodSeconds: 5
+                      failureThreshold: 30
+  readinessGates:
+    - conditionType: AggregatedDiagnosisReportAvailable
+  labels:
+    operatorframework.io/cluster-monitoring: "true"
+    operatorframework.io/operand-deployment: k8s-diagnosis-agent

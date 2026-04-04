@@ -134,6 +134,7 @@ class RuntimeKubernetesClient:
         self.apps = client.AppsV1Api()
         self.events = client.CoreV1Api()
         self.autoscaling = client.AutoscalingV2Api()
+        self.policy = client.PolicyV1Api()
         self.custom = client.CustomObjectsApi()
 
     def list_anomaly_snapshot(self) -> list[dict]:
@@ -225,6 +226,100 @@ class RuntimeKubernetesClient:
                         "deploymentCondition": "ReplicaMismatch",
                     }
                 )
+
+        # PVC Pending: pods whose attached PVC is not Bound
+        pvcs = self.core.list_persistent_volume_claim_for_all_namespaces(watch=False)
+        pending_pvc_keys: set[tuple[str, str]] = set()
+        for pvc in pvcs.items:
+            phase = getattr(pvc.status, "phase", None)
+            if phase != "Bound":
+                pending_pvc_keys.add((pvc.metadata.namespace, pvc.metadata.name))
+        for pod in pods.items:
+            namespace = pod.metadata.namespace
+            for volume in pod.spec.volumes or []:
+                claim = getattr(volume, "persistent_volume_claim", None)
+                if claim is None:
+                    continue
+                pvc_key = (namespace, getattr(claim, "claim_name", ""))
+                if pvc_key in pending_pvc_keys:
+                    findings.append(
+                        {
+                            "namespace": namespace,
+                            "name": pod.metadata.name,
+                            "kind": "Pod",
+                            "symptom": "PVCPending",
+                            "observed_for_seconds": 1800,
+                            "message": f"pvc {pvc_key[1]} is {getattr(pvc_key[1], 'phase', 'Pending')}",
+                        }
+                    )
+
+        # HPA at maxReplicas
+        hpas = self.autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces(watch=False)
+        for hpa in hpas.items:
+            namespace = hpa.metadata.namespace
+            name = hpa.metadata.name
+            current_replicas = int(getattr(hpa.status, "current_replicas", 0) or 0)
+            max_replicas = int(getattr(hpa.spec, "max_replicas", 0) or 0)
+            if max_replicas > 0 and current_replicas >= max_replicas:
+                findings.append(
+                    {
+                        "namespace": namespace,
+                        "name": name,
+                        "kind": "HorizontalPodAutoscaler",
+                        "symptom": "HPAMaxReplicas",
+                        "observed_for_seconds": 1800,
+                        "message": f"hpa at maxReplicas={max_replicas}, current={current_replicas}",
+                    }
+                )
+
+        # PDB DisruptionBlocked: pods blocked by unsatisfied PDB
+        try:
+            pdbs = self.policy.list_pod_disruption_budget_for_all_namespaces(watch=False)
+        except Exception:
+            pdbs = []
+        for pdb in pdbs or []:
+            namespace = pdb.metadata.namespace
+            name = pdb.metadata.name
+            if hasattr(pdb.status, "disruptions_allowed"):
+                disruptions_allowed = int(getattr(pdb.status, "disruptions_allowed", 1) or 1)
+                if disruptions_allowed == 0:
+                    findings.append(
+                        {
+                            "namespace": namespace,
+                            "name": name,
+                            "kind": "PodDisruptionBudget",
+                            "symptom": "PDBDisruptionBlocked",
+                            "observed_for_seconds": 1800,
+                            "message": "pdb disruptions_allowed=0",
+                        }
+                    )
+
+        # ResourceQuota exceeded: check namespace quota events
+        namespaces = self.core.list_namespace(watch=False)
+        for ns in namespaces.items:
+            ns_name = ns.metadata.name
+            try:
+                events = self.events.list_namespaced_event(
+                    namespace=ns_name,
+                    field_selector="reason=FailedCreate,FiredBy=ResourceQuota",
+                )
+                for event in events.items or []:
+                    msg = getattr(event, "message", "") or ""
+                    if "exceeded" in msg.lower() or "quota" in msg.lower():
+                        findings.append(
+                            {
+                                "namespace": ns_name,
+                                "name": ns_name,
+                                "kind": "Namespace",
+                                "symptom": "ResourceQuotaExceeded",
+                                "observed_for_seconds": 1800,
+                                "message": msg,
+                            }
+                        )
+                        break
+            except Exception:
+                pass
+
         return findings
 
     def _read_workload(self, namespace: str, kind: str, name: str):

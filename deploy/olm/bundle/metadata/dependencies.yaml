@@ -1,0 +1,9 @@
+dependencies:
+  - type: olm.package
+    packageName: kubernetes
+    versionRange: ">=1.29.0"
+  - type: olm.gvk
+    gvk:
+      group: ops.ai.yourorg
+      version: v1alpha1
+      kind: DiagnosisReport
