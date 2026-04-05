@@ -54,3 +54,24 @@ spec:
             runAsUser: 65532
             capabilities:
               drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz/live
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /healthz/startup
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30

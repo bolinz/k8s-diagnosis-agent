@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.7.0 (Planned)
+
+Release type: minor release focused on diagnosis breadth and operator maturity.
+
+### Added
+
+- New symptom types: `PVCPending`, `VolumeResizeFailure`, `NetworkPolicyBlocking`, `HPAMaxReplicas`, `ResourceQuotaExceeded`, `PDBDisruptionBlocked`.
+- Batch diagnosis aggregation: when `K8S_DIAGNOSIS_BATCH_THRESHOLD` (default 5) or more workloads share the same symptom in the same namespace, a single aggregated report is written with `impactSummary.type=batch`.
+- OLM (Operator Lifecycle Manager) bundle: `deploy/olm/bundle/` with `ClusterServiceVersion`, `Package`, CRD manifests, and `bundle.Dockerfile`. Supports OwnNamespace and MultiNamespace install modes.
+- Prometheus metrics renamed with `k8s_diagnosis_` prefix; new metrics: `k8s_diagnosis_quality_score`, `k8s_diagnosis_uncertainty_total`, `k8s_diagnosis_batch_size`, `k8s_diagnosis_batch_report_total`.
+- Grafana dashboard at `deploy/grafana/dashboard.json` with 8 panels: diagnosis rate, quality score, fallback ratio, uncertainty count, batch size, batch reports.
+- Kubernetes health probes: `GET /healthz/ready` (K8s API + CRD check), `GET /healthz/live` (process alive), `GET /healthz/startup` (model readiness).
+
+### Changed
+
+- All metric names standardized to `k8s_diagnosis_` prefix (breaking change for existing Prometheus scrapers).
+- `agent/k8s_client/runtime.py` now uses `PolicyV1Api` for PDB collection; added PVC Pending, HPA MaxReplicas, and PDB DisruptionBlocked snapshot collectors.
+- `K8S_DIAGNOSIS_BATCH_THRESHOLD` env var added (default 5, set to 0 to disable).
+
+### Security
+
 ## v0.5.3 (Planned)
 
 Release type: patch release focused on report integrity fixes and CI/CD reliability improvements.
