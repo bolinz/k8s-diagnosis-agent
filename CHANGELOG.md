@@ -10,7 +10,7 @@ Release type: minor release focused on diagnosis breadth and operator maturity.
 - Batch diagnosis aggregation: when `K8S_DIAGNOSIS_BATCH_THRESHOLD` (default 5) or more workloads share the same symptom in the same namespace, a single aggregated report is written with `impactSummary.type=batch`.
 - OLM (Operator Lifecycle Manager) bundle: `deploy/olm/bundle/` with `ClusterServiceVersion`, `Package`, CRD manifests, and `bundle.Dockerfile`. Supports OwnNamespace and MultiNamespace install modes.
 - Prometheus metrics renamed with `k8s_diagnosis_` prefix; new metrics: `k8s_diagnosis_quality_score`, `k8s_diagnosis_uncertainty_total`, `k8s_diagnosis_batch_size`, `k8s_diagnosis_batch_report_total`.
-- Grafana dashboard at `deploy/grafana/dashboard.json` with 8 panels: diagnosis rate, quality score, fallback ratio, uncertainty count, batch size, batch reports.
+- Grafana dashboard at `deploy/grafana/dashboard.json` with 7 panels: diagnosis rate, quality score, fallback ratio, uncertainty count, batch size, batch reports.
 - Kubernetes health probes: `GET /healthz/ready` (K8s API + CRD check), `GET /healthz/live` (process alive), `GET /healthz/startup` (model readiness).
 
 ### Changed

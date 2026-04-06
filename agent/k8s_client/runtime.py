@@ -229,19 +229,20 @@ class RuntimeKubernetesClient:
 
         # PVC Pending: pods whose attached PVC is not Bound
         pvcs = self.core.list_persistent_volume_claim_for_all_namespaces(watch=False)
-        pending_pvc_keys: set[tuple[str, str]] = set()
+        pending_pvc_map: dict[tuple[str, str], str] = {}
         for pvc in pvcs.items:
             phase = getattr(pvc.status, "phase", None)
             if phase != "Bound":
-                pending_pvc_keys.add((pvc.metadata.namespace, pvc.metadata.name))
+                pending_pvc_map[(pvc.metadata.namespace, pvc.metadata.name)] = phase or "Pending"
         for pod in pods.items:
             namespace = pod.metadata.namespace
             for volume in pod.spec.volumes or []:
                 claim = getattr(volume, "persistent_volume_claim", None)
                 if claim is None:
                     continue
-                pvc_key = (namespace, getattr(claim, "claim_name", ""))
-                if pvc_key in pending_pvc_keys:
+                pvc_name = getattr(claim, "claim_name", "")
+                pvc_key = (namespace, pvc_name)
+                if pvc_key in pending_pvc_map:
                     findings.append(
                         {
                             "namespace": namespace,
@@ -249,7 +250,7 @@ class RuntimeKubernetesClient:
                             "kind": "Pod",
                             "symptom": "PVCPending",
                             "observed_for_seconds": 1800,
-                            "message": f"pvc {pvc_key[1]} is {getattr(pvc_key[1], 'phase', 'Pending')}",
+                            "message": f"pvc {pvc_name} is {pending_pvc_map[pvc_key]}",
                         }
                     )
 
@@ -301,7 +302,7 @@ class RuntimeKubernetesClient:
             try:
                 events = self.events.list_namespaced_event(
                     namespace=ns_name,
-                    field_selector="reason=FailedCreate,FiredBy=ResourceQuota",
+                    field_selector="reason=FailedCreate",
                 )
                 for event in events.items or []:
                     msg = getattr(event, "message", "") or ""

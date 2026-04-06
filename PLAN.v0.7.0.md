@@ -100,11 +100,10 @@ Add support for the following symptom types in `SUPPORTED_SYMPTOMS` and `fallbac
 |----|-------|-------|
 | PR-A | Symptom types + rules | `agent/analyzers/rules.py`, `agent/k8s_client/runtime.py`, tests |
 | PR-B | Batch aggregation | `agent/service.py`, `agent/analyzers/rules.py` |
-| PR-C | Batch aggregation | `agent/service.py`, `agent/analyzers/rules.py` |
-| PR-D | OLM bundle | `bundle/` dir, `deploy/olm/` |
-| PR-E | Metrics + Grafana | `agent/metrics.py`, `deploy/grafana/dashboard.json` |
-| PR-F | Health probes | `agent/ui/http_server.py`, `deploy/base/deployment.yaml` |
-| PR-G | Version bump + release prep | `pyproject.toml`, `Chart.yaml`, CHANGELOG |
+| PR-C | OLM bundle | `bundle/` dir, `deploy/olm/` |
+| PR-D | Metrics + Grafana | `agent/metrics.py`, `deploy/grafana/dashboard.json` |
+| PR-E | Health probes | `agent/ui/http_server.py`, `deploy/base/deployment.yaml` |
+| PR-F | Version bump + release prep | `pyproject.toml`, `Chart.yaml`, CHANGELOG |
 
 ---
 
