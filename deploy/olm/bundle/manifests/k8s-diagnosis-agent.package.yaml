@@ -1,0 +1,7 @@
+packageName: k8s-diagnosis-agent
+channels:
+  - name: stable
+    currentCSV: k8s-diagnosis-agent.v0.7.0
+  - name: alpha
+    currentCSV: k8s-diagnosis-agent.v0.7.0
+defaultChannel: stable

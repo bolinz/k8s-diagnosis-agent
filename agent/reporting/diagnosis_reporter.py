@@ -184,5 +184,5 @@ class KubernetesDiagnosisReportWriter:
             workload_name=trigger.workload.name,
             symptom=trigger.symptom,
         )
-        inc_counter("report_upsert_total")
+        inc_counter("k8s_diagnosis_report_upsert_total")
         return result

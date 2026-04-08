@@ -195,7 +195,7 @@ class DiagnosisAgent:
                         trace_id=trace_id,
                     )
                 tool_calls += 1
-                inc_counter("tool_calls_total")
+                inc_counter("k8s_diagnosis_tool_calls_total")
                 arguments = json.loads(call.get("arguments") or "{}")
                 log_event(
                     LOGGER,

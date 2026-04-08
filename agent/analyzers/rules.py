@@ -21,6 +21,12 @@ SUPPORTED_SYMPTOMS = {
     "ProgressDeadlineExceeded",
     "ReplicaMismatch",
     "NodeNotReadyImpact",
+    "PVCPending",
+    "VolumeResizeFailure",
+    "NetworkPolicyBlocking",
+    "HPAMaxReplicas",
+    "ResourceQuotaExceeded",
+    "PDBDisruptionBlocked",
 }
 
 
@@ -218,6 +224,69 @@ class RuleEngine:
             ]
             recommendations = [
                 "Inspect deployment status, unavailable replicas, and related pod conditions"
+            ]
+        elif symptom == "PVCPending":
+            severity = "warning"
+            raw_message = str(trigger.raw_signal.get("message", "")).lower()
+            if any(t in raw_message for t in {"waiting", "pending", "not bound", "unbound", "cannot find", "claim"}):
+                probable_causes = [
+                    "A PVC referenced by the pod is not in a Bound state, preventing volume mounting"
+                ]
+                recommendations = [
+                    "Check PVC phase, storage class, and binding conditions; ensure PV exists and is not pre-bound elsewhere",
+                    "Inspect events for the PVC to identify why binding is pending (e.g., no storage class, no PV, or WaitForFirstConsumer not satisfied)"
+                ]
+            else:
+                probable_causes = [
+                    "A required volume is not ready for the pod to start"
+                ]
+                recommendations = [
+                    "Review pod events and PVC status to identify the volume provisioning issue"
+                ]
+        elif symptom == "VolumeResizeFailure":
+            severity = "warning"
+            probable_causes = [
+                "A PersistentVolumeClaim failed to expand its underlying volume after capacity increase was requested"
+            ]
+            recommendations = [
+                "Check PVC conditions for FileSystemResizePending; verify storage class allows expansion and that the PV supports online expansion",
+                "If the filesystem is already full, a pod restart may be required after the expansion is complete"
+            ]
+        elif symptom == "NetworkPolicyBlocking":
+            severity = "warning"
+            probable_causes = [
+                "A NetworkPolicy applied to the pod's namespace or pod selector is blocking required network connectivity"
+            ]
+            recommendations = [
+                "Review NetworkPolicy specs in the namespace and verify that allowed ingress/egress rules cover required communication",
+                "Check pod events for connection failures that match the policy's blocked ports or label selectors"
+            ]
+        elif symptom == "HPAMaxReplicas":
+            severity = "warning"
+            probable_causes = [
+                "The HorizontalPodAutoscaler has reached its maxReplicas ceiling and cannot scale up further"
+            ]
+            recommendations = [
+                "Review HPA spec maxReplicas and current replica count; assess whether the limit should be raised",
+                "Inspect resource requests and limits; if CPU/memory are the scaling metric, consider increasing pod resource requests or adjusting the HPA target utilization"
+            ]
+        elif symptom == "ResourceQuotaExceeded":
+            severity = "warning"
+            probable_causes = [
+                "A Namespace ResourceQuota is preventing pod or resource creation due to exceeded hard limits"
+            ]
+            recommendations = [
+                "Run kubectl describe resourcequota -n <namespace> to see which quota is exceeded",
+                "Either request a quota increase from the cluster admin or reduce resource usage within the namespace"
+            ]
+        elif symptom == "PDBDisruptionBlocked":
+            severity = "warning"
+            probable_causes = [
+                "A PodDisruptionBudget's MinAvailable requirement is not satisfied, blocking voluntary disruptions"
+            ]
+            recommendations = [
+                "Review PDB MinAvailable vs current ready pods; ensure enough pods are running to satisfy the disruption budget",
+                "If performing a node drain, verify that the drain is not needed simultaneously across multiple pods constrained by the same PDB"
             ]
         else:
             probable_causes = [

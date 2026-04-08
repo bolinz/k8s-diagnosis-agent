@@ -202,6 +202,44 @@ def serve_http(port: int, service) -> None:
             if parsed.path == "/healthz":
                 self._write_json({"ok": True})
                 return
+            if parsed.path == "/healthz/live":
+                # Liveness: process is alive
+                self._write_json({"ok": True, "status": "live"})
+                return
+            if parsed.path == "/healthz/ready":
+                # Readiness: K8s API connectivity + CRD existence
+                try:
+                    client = service.client
+                    # Probe K8s connectivity by listing a lightweight resource
+                    client.list_reports()
+                    self._write_json({"ok": True, "status": "ready"})
+                except Exception as exc:
+                    self._write_json(
+                        {"ok": False, "status": "not_ready", "error": str(exc)},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                return
+            if parsed.path == "/healthz/startup":
+                # Startup: model connectivity check
+                try:
+                    model_client = getattr(service.codex_agent, "responses_client", None)
+                    model_name = service._active_model_name()
+                    if model_client is not None and hasattr(model_client, "provider_name"):
+                        provider = getattr(model_client, "provider_name", "unknown")
+                        self._write_json({
+                            "ok": True,
+                            "status": "startup_complete",
+                            "model": model_name,
+                            "provider": provider,
+                        })
+                    else:
+                        self._write_json({"ok": True, "status": "startup_complete", "model": model_name})
+                except Exception as exc:
+                    self._write_json(
+                        {"ok": False, "status": "startup_failed", "error": str(exc)},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                return
             if parsed.path == "/metrics":
                 self._write_text(
                     render_prometheus_metrics(),

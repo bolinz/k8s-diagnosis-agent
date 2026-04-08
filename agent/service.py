@@ -11,7 +11,7 @@ from agent.analyzers.attribution import score_root_cause_candidates
 from agent.analyzers.rules import RuleEngine
 from agent.config.settings import Settings
 from agent.k8s_client.base import KubernetesReadClient
-from agent.metrics import inc_counter, observe_diagnosis_duration
+from agent.metrics import inc_counter, observe_diagnosis_duration, observe_quality_score, observe_batch_size
 from agent.models import DiagnosisResult, PendingFinding, TriggerContext, WorkloadRef
 from agent.orchestrator.diagnosis_agent import DiagnosisAgent
 from agent.orchestrator.responses_client import (
@@ -41,17 +41,106 @@ class AgentService:
         log_event(LOGGER, logging.INFO, "scan_start", "scheduled scan started")
         findings = self._collect_findings()
         results = []
-        for finding in findings:
-            results.append(self.process_trigger(finding.trigger))
+        threshold = self.settings.batch_threshold
+        if threshold > 0:
+            grouped: dict[tuple[str, str], list[PendingFinding]] = {}
+            for finding in findings:
+                key = (finding.trigger.workload.namespace, finding.trigger.symptom)
+                grouped.setdefault(key, []).append(finding)
+            batch_count = 0
+            for (namespace, symptom), group in grouped.items():
+                if len(group) >= threshold:
+                    batch_count += 1
+                    results.append(self._process_batch(group))
+            individual_count = len(findings) - sum(len(g) for g in grouped.values() if len(g) >= threshold)
+            for (namespace, symptom), group in grouped.items():
+                if len(group) < threshold:
+                    for finding in group:
+                        results.append(self.process_trigger(finding.trigger))
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "scan_end",
+                "scheduled scan finished",
+                findings=len(findings),
+                reports=len(results),
+                batch_reports=batch_count,
+                individual_reports=individual_count,
+            )
+        else:
+            for finding in findings:
+                results.append(self.process_trigger(finding.trigger))
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "scan_end",
+                "scheduled scan finished",
+                findings=len(findings),
+                reports=len(results),
+            )
+        return results
+
+    def _process_batch(self, group: list[PendingFinding]) -> dict:
+        """Create a single aggregated diagnosis report for a group of findings with the same namespace and symptom."""
+        if not group:
+            raise ValueError("batch group cannot be empty")
+        first = group[0]
+        trigger = first.trigger
+        affected_workloads = [
+            {
+                "kind": f.trigger.workload.kind,
+                "namespace": f.trigger.workload.namespace,
+                "name": f.trigger.workload.name,
+                "observed_for_seconds": f.trigger.observed_for_seconds,
+            }
+            for f in group
+        ]
+        impact_summary = {
+            "type": "batch",
+            "affected_count": len(affected_workloads),
+            "affected_workloads": affected_workloads,
+        }
+        diagnosis = DiagnosisResult(
+            summary=f"Batch diagnosis: {len(affected_workloads)} workloads in namespace '{trigger.workload.namespace}' affected by {trigger.symptom}",
+            severity="warning",
+            probable_causes=[
+                f"{len(affected_workloads)} workloads experiencing the same symptom in namespace '{trigger.workload.namespace}'"
+            ],
+            evidence=[
+                f"batch_size={len(affected_workloads)}",
+                f"symptom={trigger.symptom}",
+                f"namespace={trigger.workload.namespace}",
+            ],
+            recommendations=[
+                f"Investigate namespace-level issue affecting {trigger.workload.namespace}",
+                "Review cluster events and resource quotas for the namespace",
+                "Check for node-level issues or network policy misconfiguration",
+            ],
+            confidence=0.5,
+            related_objects=[],
+            root_cause_candidates=[],
+            evidence_timeline=[],
+            impact_summary=impact_summary,
+            quality_score={"overall": 0.5, "method": "batch_aggregation"},
+            uncertainties=[f"Individual root causes may vary across {len(affected_workloads)} workloads"],
+            evidence_attribution=[],
+            raw_agent_output={"mode": "batch", "batch_size": len(affected_workloads)},
+            used_fallback=True,
+        )
+        inc_counter("k8s_diagnosis_requests_total")
+        inc_counter("k8s_diagnosis_batch_report_total")
+        observe_batch_size(len(affected_workloads))
+        result = self._persist_report(trigger, diagnosis)
         log_event(
             LOGGER,
             logging.INFO,
-            "scan_end",
-            "scheduled scan finished",
-            findings=len(findings),
-            reports=len(results),
+            "batch_report_created",
+            "batch aggregated report written",
+            namespace=trigger.workload.namespace,
+            symptom=trigger.symptom,
+            batch_size=len(affected_workloads),
         )
-        return results
+        return result
 
     def process_alert(self, payload: dict) -> dict:
         workload_ref = payload.get("workloadRef", {})
@@ -132,7 +221,7 @@ class AgentService:
 
     def process_trigger(self, trigger: TriggerContext) -> dict:
         start = perf_counter()
-        inc_counter("diagnosis_requests_total")
+        inc_counter("k8s_diagnosis_requests_total")
         trigger = self._normalize_trigger(trigger)
         trigger = self._augment_trigger_signal(trigger)
         trigger = self._attach_correlation_context(trigger)
@@ -158,7 +247,7 @@ class AgentService:
             self.codex_agent.diagnose(trigger, registry),
         )
         if diagnosis.used_fallback:
-            inc_counter("diagnosis_fallback_total")
+            inc_counter("k8s_diagnosis_fallback_total")
         result = self._persist_report(trigger, diagnosis)
         observe_diagnosis_duration(perf_counter() - start)
         return result
@@ -510,6 +599,11 @@ class AgentService:
             confidence=diagnosis.confidence if diagnosis.confidence > 0 else fallback.confidence,
             used_fallback=used_fallback,
         )
+        overall_score = quality_score.get("overall", 0.0)
+        if overall_score > 0:
+            observe_quality_score(overall_score)
+        for _ in uncertainties:
+            inc_counter("k8s_diagnosis_uncertainty_total")
         evidence_timeline = diagnosis.evidence_timeline or correlation.get("evidenceTimeline", [])
         evidence_attribution = self._build_evidence_attribution(
             trigger=trigger,
