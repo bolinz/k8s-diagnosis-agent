@@ -344,6 +344,7 @@ def build_settings() -> Settings:
         diagnosis_name_prefix="diagnosis",
         event_dedupe_window_seconds=300,
         event_storm_threshold=5,
+        batch_threshold=5,
         scope_mode="strict",
         scope_allowed_namespaces=(),
         workload_name="k8s-diagnosis-agent",
@@ -435,9 +436,9 @@ def test_metrics_increment_for_diagnosis_and_tool_calls():
         }
     )
     metrics = snapshot_metrics()
-    assert metrics["diagnosis_requests_total"] >= 1
-    assert metrics["tool_calls_total"] >= 1
-    assert metrics["diagnosis_duration_seconds_count"] >= 1
+    assert metrics["k8s_diagnosis_requests_total"] >= 1
+    assert metrics["k8s_diagnosis_tool_calls_total"] >= 1
+    assert metrics["k8s_diagnosis_duration_seconds_count"] >= 1
 
 
 def test_metrics_increment_for_fallback_diagnosis():
@@ -459,8 +460,8 @@ def test_metrics_increment_for_fallback_diagnosis():
         }
     )
     metrics = snapshot_metrics()
-    assert metrics["diagnosis_requests_total"] >= 1
-    assert metrics["diagnosis_fallback_total"] >= 1
+    assert metrics["k8s_diagnosis_requests_total"] >= 1
+    assert metrics["k8s_diagnosis_fallback_total"] >= 1
 
 
 def test_process_alert_supports_workload_ref_payload_shape():
