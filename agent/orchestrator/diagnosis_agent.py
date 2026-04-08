@@ -67,6 +67,7 @@ class DiagnosisAgent:
         trigger: TriggerContext,
         tool_registry: ToolRegistry,
     ) -> DiagnosisResult:
+        self.tool_history.clear()
         trace = self._new_trace(trigger)
         trace_id = trace["traceId"]
         if (
@@ -320,9 +321,7 @@ class DiagnosisAgent:
             root_cause_candidates=[
                 item for item in payload.get("rootCauseCandidates", []) if isinstance(item, dict)
             ],
-            evidence_timeline=[
-                item for item in payload.get("evidenceTimeline", []) if isinstance(item, dict)
-            ],
+            evidence_timeline=self._reconstruct_evidence_timeline(trigger),
             impact_summary=payload.get("impactSummary", {})
             if isinstance(payload.get("impactSummary", {}), dict)
             else {},
@@ -330,6 +329,85 @@ class DiagnosisAgent:
         )
         self._attach_trace(result, trace, fallback_reason="")
         return result
+
+    def _reconstruct_evidence_timeline(self, trigger: TriggerContext) -> list[dict[str, Any]]:
+        """Reconstruct evidence timeline from actual event tool outputs in tool_history.
+
+        This replaces the model's unreliable evidenceTimeline output with data
+        extracted directly from the events returned by get_pod_events / get_workload_events
+        / get_namespace_events tools.
+        """
+        timeline: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for record in self.tool_history:
+            if record.name not in (
+                "get_pod_events",
+                "get_workload_events",
+                "get_related_events",
+                "get_namespace_events",
+                "get_node_events",
+            ):
+                continue
+
+            try:
+                data = json.loads(record.output)
+            except json.JSONDecodeError:
+                continue
+
+            items = data.get("items") if isinstance(data, dict) else None
+            if not isinstance(items, list):
+                continue
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+
+                reason = str(item.get("reason", "")).strip()
+                message = str(item.get("message", "")).strip()
+                signal = reason or message
+                if not signal or signal == "null":
+                    continue
+
+                ts = item.get("lastTimestamp") or item.get("eventTime") or ""
+                obj = item.get("involvedObject", {})
+                if not isinstance(obj, dict):
+                    continue
+
+                kind = str(obj.get("kind", "")).strip()
+                name = str(obj.get("name", "")).strip()
+                namespace = str(obj.get("namespace", "")).strip()
+
+                key = f"{signal}:{kind}:{name}:{ts}"
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                entry: dict[str, Any] = {
+                    "signal": signal,
+                    "objectRef": {
+                        "kind": kind,
+                        "name": name,
+                        "namespace": namespace,
+                    },
+                }
+                if ts:
+                    entry["time"] = ts
+                if reason and message:
+                    entry["reason"] = reason
+                    entry["message"] = message
+
+                timeline.append(entry)
+
+        # Sort by time ascending, oldest first
+        def sort_key(e: dict[str, Any]) -> str:
+            return str(e.get("time", ""))
+
+        timeline.sort(key=sort_key)
+
+        # Limit to most recent events (k8s events older than ~1h are less relevant)
+        # Keep up to 20 entries
+        return timeline[-20:] if len(timeline) > 20 else timeline
 
     def fallback_diagnosis(
         self,
