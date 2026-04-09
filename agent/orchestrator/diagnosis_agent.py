@@ -321,7 +321,7 @@ class DiagnosisAgent:
             root_cause_candidates=[
                 item for item in payload.get("rootCauseCandidates", []) if isinstance(item, dict)
             ],
-            evidence_timeline=self._reconstruct_evidence_timeline(trigger),
+            evidence_timeline=self._reconstruct_evidence_timeline(),
             impact_summary=payload.get("impactSummary", {})
             if isinstance(payload.get("impactSummary", {}), dict)
             else {},
@@ -330,7 +330,7 @@ class DiagnosisAgent:
         self._attach_trace(result, trace, fallback_reason="")
         return result
 
-    def _reconstruct_evidence_timeline(self, trigger: TriggerContext) -> list[dict[str, Any]]:
+    def _reconstruct_evidence_timeline(self) -> list[dict[str, Any]]:
         """Reconstruct evidence timeline from actual event tool outputs in tool_history.
 
         This replaces the model's unreliable evidenceTimeline output with data
