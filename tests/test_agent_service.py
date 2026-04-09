@@ -2237,3 +2237,269 @@ def engine_result():
         recommendations=["Increase quota or reduce requests."],
         confidence=0.8,
     )
+
+
+def test_evidence_timeline_reconstructed_from_tool_history():
+    """evidenceTimeline is reconstructed from get_pod_events output, not model output."""
+
+    class FakeK8sClientWithEvents(FakeKubernetesClient):
+        def get_pod_events(self, namespace: str, pod_name: str) -> dict:
+            self.calls.append(("get_pod_events", namespace, pod_name))
+            return {
+                "items": [
+                    {
+                        "reason": "FailedScheduling",
+                        "message": "0/1 nodes available: pod has unbound PVC",
+                        "lastTimestamp": "2026-04-08T15:03:29Z",
+                        "involvedObject": {
+                            "kind": "Pod",
+                            "namespace": namespace,
+                            "name": pod_name,
+                        },
+                    },
+                    {
+                        "reason": "FailedScheduling",
+                        "message": "0/1 nodes available: pod has unbound PVC",
+                        "lastTimestamp": "2026-04-08T15:08:31Z",
+                        "involvedObject": {
+                            "kind": "Pod",
+                            "namespace": namespace,
+                            "name": pod_name,
+                        },
+                    },
+                    {
+                        "reason": "ProvisionFailed",
+                        "message": "storage class does-not-exist-sc not found",
+                        "lastTimestamp": "2026-04-08T15:03:35Z",
+                        "involvedObject": {
+                            "kind": "PersistentVolumeClaim",
+                            "namespace": namespace,
+                            "name": "e2e-unbound-pvc",
+                        },
+                    },
+                ]
+            }
+
+    client = FakeK8sClientWithEvents()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="test-cluster",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=600,
+    )
+    engine = RuleEngine(cluster_name="test-cluster", min_observation_seconds=300)
+
+    # First response: model calls get_pod_events
+    response_tool_call = {
+        "output": [
+            {
+                "type": "function_call",
+                "name": "get_pod_events",
+                "call_id": "call_1",
+                "arguments": '{"namespace":"payments","pod_name":"checkout-abc"}',
+            }
+        ]
+    }
+    # Second response: model returns diagnosis (no more tool calls)
+    response_final = {
+        "output_text": json.dumps(
+            {
+                "summary": "Pod pending due to unbound PVC.",
+                "severity": "critical",
+                "probableCauses": ["PVC has no storage class"],
+                "evidence": ["PVC status is Pending"],
+                "recommendations": ["Create storage class"],
+                "confidence": 0.9,
+                # Model returns empty/incomplete timeline — should be overridden
+                "evidenceTimeline": [{"signal": "OnlyOneEvent", "time": "2026-01-01T00:00:00Z"}],
+            }
+        )
+    }
+
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient([response_tool_call, response_final]),
+        rule_engine=engine,
+        model="test-model",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    registry = ToolRegistry(client, trigger)
+    diagnosis = agent.diagnose(trigger, registry)
+
+    # Verify tool was called
+    assert client.calls[0][0] == "get_pod_events"
+
+    # Verify evidence_timeline is reconstructed from tool output, not model output
+    assert len(diagnosis.evidence_timeline) == 3, (
+        f"Expected 3 timeline events, got {len(diagnosis.evidence_timeline)}: {diagnosis.evidence_timeline}"
+    )
+
+    # Events should be sorted by time ascending
+    times = [e.get("time", "") for e in diagnosis.evidence_timeline]
+    assert times == sorted(times), f"Timeline not sorted: {times}"
+
+    # Check signals are correct
+    signals = [e.get("signal") for e in diagnosis.evidence_timeline]
+    assert "FailedScheduling" in signals
+    assert "ProvisionFailed" in signals
+
+    # Model's fake single event should NOT be in the result
+    model_signals = [e.get("signal") for e in diagnosis.evidence_timeline]
+    assert "OnlyOneEvent" not in model_signals
+
+    # First event should be the earliest FailedScheduling
+    assert diagnosis.evidence_timeline[0]["time"] == "2026-04-08T15:03:29Z"
+    assert diagnosis.evidence_timeline[0]["signal"] == "FailedScheduling"
+
+
+def test_evidence_timeline_deduplicates_events():
+    """Duplicate events (same signal/kind/name/timestamp) are deduplicated."""
+
+    class FakeK8sClientWithDupes(FakeKubernetesClient):
+        def get_pod_events(self, namespace: str, pod_name: str) -> dict:
+            # Same event returned twice (simulating what might happen with k8s event duplicates)
+            event = {
+                "reason": "FailedScheduling",
+                "message": "nodes unavailable",
+                "lastTimestamp": "2026-04-08T15:03:29Z",
+                "involvedObject": {"kind": "Pod", "namespace": namespace, "name": pod_name},
+            }
+            return {"items": [event, event]}
+
+    client = FakeK8sClientWithDupes()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="test-cluster",
+        workload=WorkloadRef(kind="Pod", namespace="default", name="test-pod"),
+        symptom="Pending",
+        observed_for_seconds=300,
+    )
+    engine = RuleEngine(cluster_name="test-cluster", min_observation_seconds=300)
+
+    response_tool_call = {
+        "output": [
+            {
+                "type": "function_call",
+                "name": "get_pod_events",
+                "call_id": "call_1",
+                "arguments": '{"namespace":"default","pod_name":"test-pod"}',
+            }
+        ]
+    }
+    response_final = {
+        "output_text": json.dumps(
+            {
+                "summary": "Pod pending.",
+                "severity": "warning",
+                "probableCauses": [],
+                "evidence": [],
+                "recommendations": [],
+                "confidence": 0.5,
+                "evidenceTimeline": [],
+            }
+        )
+    }
+
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient([response_tool_call, response_final]),
+        rule_engine=engine,
+        model="test-model",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    registry = ToolRegistry(client, trigger)
+    diagnosis = agent.diagnose(trigger, registry)
+
+    # Duplicate should be deduplicated to 1 entry
+    assert len(diagnosis.evidence_timeline) == 1
+
+
+def test_tool_history_cleared_between_diagnoses():
+    """tool_history is cleared at the start of each diagnose() call."""
+
+    client = FakeKubernetesClient()
+    trigger = TriggerContext(
+        source="scheduled",
+        cluster="test-cluster",
+        workload=WorkloadRef(kind="Pod", namespace="payments", name="checkout-abc"),
+        symptom="Pending",
+        observed_for_seconds=300,
+    )
+    engine = RuleEngine(cluster_name="test-cluster", min_observation_seconds=300)
+
+    def make_responses():
+        # Each diagnose() needs 2 responses: tool call + final
+        return [
+            # First diagnose
+            {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "get_pod_events",
+                        "call_id": "call_1",
+                        "arguments": '{"namespace":"payments","pod_name":"checkout-abc"}',
+                    }
+                ]
+            },
+            {
+                "output_text": json.dumps(
+                    {
+                        "summary": "Pod pending.",
+                        "severity": "warning",
+                        "probableCauses": [],
+                        "evidence": [],
+                        "recommendations": [],
+                        "confidence": 0.5,
+                        "evidenceTimeline": [],
+                    }
+                )
+            },
+            # Second diagnose
+            {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "get_pod_events",
+                        "call_id": "call_2",
+                        "arguments": '{"namespace":"payments","pod_name":"checkout-abc"}',
+                    }
+                ]
+            },
+            {
+                "output_text": json.dumps(
+                    {
+                        "summary": "Pod still pending.",
+                        "severity": "warning",
+                        "probableCauses": [],
+                        "evidence": [],
+                        "recommendations": [],
+                        "confidence": 0.5,
+                        "evidenceTimeline": [],
+                    }
+                )
+            },
+        ]
+
+    agent = CodexDiagnosisAgent(
+        responses_client=FakeResponsesClient(make_responses()),
+        rule_engine=engine,
+        model="test-model",
+        max_tool_calls=8,
+        max_input_bytes=20000,
+    )
+    registry = ToolRegistry(client, trigger)
+
+    # First diagnosis
+    diagnosis1 = agent.diagnose(trigger, registry)
+    first_history_len = len(agent.tool_history)
+    assert first_history_len > 0, "tool_history should be populated after first diagnose"
+
+    # Second diagnosis should have fresh tool_history (cleared at start of diagnose)
+    diagnosis2 = agent.diagnose(trigger, registry)
+    # If tool_history was NOT cleared, it would accumulate: 2 + new calls
+    # With clear(), each diagnose starts fresh (2 calls per diagnose)
+    assert len(agent.tool_history) == first_history_len, (
+        f"tool_history should be {first_history_len} after second diagnose, "
+        f"got {len(agent.tool_history)} — tool_history was NOT cleared between calls"
+    )
