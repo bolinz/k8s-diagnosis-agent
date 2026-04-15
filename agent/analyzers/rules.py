@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agent.config.fallback_rule_loader import FallbackRuleLoader
 from agent.models import DiagnosisResult, PendingFinding, TriggerContext, WorkloadRef
 
 
@@ -34,6 +35,11 @@ SUPPORTED_SYMPTOMS = {
 class RuleEngine:
     cluster_name: str
     min_observation_seconds: int
+    _rule_loader: FallbackRuleLoader = None
+
+    def __post_init__(self):
+        if self._rule_loader is None:
+            self._rule_loader = FallbackRuleLoader()
 
     def findings_from_snapshot(self, snapshot: list[dict]) -> list[PendingFinding]:
         findings: list[PendingFinding] = []

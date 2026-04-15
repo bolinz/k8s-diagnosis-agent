@@ -1,0 +1,33 @@
+# Quality scoring weights for diagnosis result evaluation.
+# Used by QualityScorer to compute overall quality scores.
+# Backward compatible: uses hardcoded defaults if this file is missing.
+
+# Per-dimension weights (must sum to 1.0 for proper normalization)
+weights:
+  evidence_coverage: 0.28
+  recommendation_actionability: 0.20
+  root_cause_strength: 0.20
+  correlation_strength: 0.12
+  confidence_alignment: 0.20
+
+# Evidence scaling: max evidence items considered for full score
+evidence_scale:
+  max_items: 3  # evidence_coverage = clamp(len(evidence) / 3.0)
+
+recommendation_scale:
+  max_items: 2  # recommendation_actionability = clamp(len(recommendations) / 2.0)
+
+root_candidate_scale:
+  max_items: 2  # root_cause_strength = clamp(len(root_candidates) / 2.0)
+
+correlation_scale:
+  max_items: 6  # correlation_strength = clamp((len(related_objects) + len(root_candidates)) / 6.0)
+
+# Penalties
+penalties:
+  fallback: 0.15  # deducted from overall score when using fallback
+
+# Score bounds
+score_bounds:
+  min: 0.0
+  max: 1.0
