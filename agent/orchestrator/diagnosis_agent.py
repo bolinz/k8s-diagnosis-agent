@@ -60,14 +60,13 @@ class DiagnosisAgent:
     max_tool_calls: int
     max_input_bytes: int
     max_diagnosis_seconds: int = 45
-    tool_history: list[ToolCallRecord] = field(default_factory=list)
 
     def diagnose(
         self,
         trigger: TriggerContext,
         tool_registry: ToolRegistry,
-    ) -> DiagnosisResult:
-        self.tool_history.clear()
+    ) -> tuple[DiagnosisResult, list[ToolCallRecord]]:
+        tool_history: list[ToolCallRecord] = []
         trace = self._new_trace(trigger)
         trace_id = trace["traceId"]
         if (
@@ -167,7 +166,7 @@ class DiagnosisAgent:
             if not function_calls:
                 trace["toolCallsUsed"] = tool_calls
                 trace["durationMs"] = int((perf_counter() - started_at) * 1000)
-                return self._parse_final_response(response, trigger, trace)
+                return self._parse_final_response(response, trigger, trace, tool_history)
             messages.append(
                 {
                     "type": "assistant_tool_calls",
@@ -217,7 +216,7 @@ class DiagnosisAgent:
                     duration_ms=tool_elapsed_ms,
                     scope_guard_hit=scope_guard_hit,
                 )
-                self.tool_history.append(
+                tool_history.append(
                     ToolCallRecord(
                         name=call["name"],
                         arguments=arguments,
@@ -295,19 +294,21 @@ class DiagnosisAgent:
         response: dict[str, Any],
         trigger: TriggerContext,
         trace: dict[str, Any],
-    ) -> DiagnosisResult:
+        tool_history: list[ToolCallRecord],
+    ) -> tuple[DiagnosisResult, list[ToolCallRecord]]:
         text = self._extract_output_text(response)
         try:
             payload = json.loads(text)
         except json.JSONDecodeError:
-                return self._fallback_with_trace(
-                    trigger=trigger,
-                    trace=trace,
-                    reason="invalid_model_json",
+            fallback_result, _ = self._fallback_with_trace(
+                trigger=trigger,
+                trace=trace,
+                reason="invalid_model_json",
                 provider=getattr(self.responses_client, "provider_name", ""),
                 model=self.model,
                 response_text=truncate_text(text, 400),
             )
+            return fallback_result, tool_history
         result = DiagnosisResult(
             summary=str(payload.get("summary", "")).strip() or "Diagnosis incomplete",
             severity=_normalize_severity(payload.get("severity", "warning")),
@@ -321,16 +322,19 @@ class DiagnosisAgent:
             root_cause_candidates=[
                 item for item in payload.get("rootCauseCandidates", []) if isinstance(item, dict)
             ],
-            evidence_timeline=self._reconstruct_evidence_timeline(),
+            evidence_timeline=self._reconstruct_evidence_timeline(tool_history),
             impact_summary=payload.get("impactSummary", {})
             if isinstance(payload.get("impactSummary", {}), dict)
             else {},
             raw_agent_output={"response": response, "text": text},
         )
         self._attach_trace(result, trace, fallback_reason="")
-        return result
+        return result, tool_history
 
-    def _reconstruct_evidence_timeline(self) -> list[dict[str, Any]]:
+    def _reconstruct_evidence_timeline(
+        self,
+        tool_history: list[ToolCallRecord],
+    ) -> list[dict[str, Any]]:
         """Reconstruct evidence timeline from actual event tool outputs in tool_history.
 
         This replaces the model's unreliable evidenceTimeline output with data
@@ -340,7 +344,7 @@ class DiagnosisAgent:
         timeline: list[dict[str, Any]] = []
         seen: set[str] = set()
 
-        for record in self.tool_history:
+        for record in tool_history:
             if record.name not in (
                 "get_pod_events",
                 "get_workload_events",
@@ -416,12 +420,13 @@ class DiagnosisAgent:
         **payload: Any,
     ) -> DiagnosisResult:
         trace = self._new_trace(trigger)
-        return self._fallback_with_trace(
+        result, _ = self._fallback_with_trace(
             trigger=trigger,
             trace=trace,
             reason=reason,
             **payload,
         )
+        return result
 
     def _extract_output_text(self, response: dict[str, Any]) -> str:
         if isinstance(response.get("output_text"), str):
@@ -482,7 +487,7 @@ class DiagnosisAgent:
         trace: dict[str, Any],
         reason: str,
         **payload: Any,
-    ) -> DiagnosisResult:
+    ) -> tuple[DiagnosisResult, list[ToolCallRecord]]:
         trace["fallbackReason"] = reason
         event_payload = {
             "provider": getattr(self.responses_client, "provider_name", ""),
@@ -500,7 +505,7 @@ class DiagnosisAgent:
         )
         result = self.rule_engine.fallback_diagnosis(trigger)
         self._attach_trace(result, trace, fallback_reason=reason)
-        return result
+        return result, []
 
     def _attach_trace(
         self,

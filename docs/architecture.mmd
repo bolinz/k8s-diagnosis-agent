@@ -1,0 +1,71 @@
+flowchart TB
+    subgraph入口["入口层"]
+        W[EventWatcher<br/>Kubernetes Watch]
+        S[Scheduler<br/>周期性快照]
+        H[HTTP Webhook<br/>POST /alert]
+    end
+
+    subgraph队列["事件队列"]
+        Q[AsyncEventQueue<br/>maxsize=100<br/>num_workers=4]
+    end
+
+    subgraph去重["事件去重"]
+        D[EventStormDeduper<br/>时间窗口聚合<br/>count/first_seen/last_seen/aggregated]
+    end
+
+    subgraph编排["诊断编排"]
+        T[TriggerTransformer<br/>normalize · augment · correlate]
+        E[DiagnosisEngine<br/>循环调用 DiagnosisAgent]
+        A[DiagnosisAgent<br/>pure functional diagnose()<br/>returns tuple[Result, ToolCallRecords]]
+        R[ToolRegistry<br/>20 Kubernetes tools]
+    end
+
+    subgraphK8s["K8s 客户端"]
+        C[RuntimeKubernetesClient<br/>facade]
+        X[ToolExecutor<br/>20 tool implementations]
+        P[KubernetesReadClient<br/>Protocol]
+    end
+
+    subgraph增强["结果增强"]
+        N[DiagnosisEnricher<br/>qualityScore · evidenceAttribution<br/>uncertainties · evidenceTimeline]
+        QL[QualityScorer<br/>YAML配置评分]
+        FL[FallbackRuleLoader<br/>YAML fallback规则]
+    end
+
+    subgraph报告["报告持久化"]
+        WRT[ReportWriter<br/>orchestrates]
+        F[DiagnosisReportFormatter]
+        KW[KubernetesDiagnosisReportWriter<br/>upsert_report<br/>atomic create→409→patch]
+    end
+
+    W --> Q
+    S --> Q
+    H --> Q
+    Q --> D
+    D --> T
+    T --> E
+    E --> A
+    A --> R
+    R --> C
+    C --> X
+    X -.-> P
+    E --> N
+    N --> QL
+    N --> FL
+    N --> KW
+    WRT --> F
+    WRT --> KW
+
+    class W,S,H external
+    class Q,async
+    class D dedup
+    class T,E,A,R orch
+    class C,X,P k8s
+    class N,Ql,FL enrich
+    class WRT,F,KW report
+
+    style Q fill:#1a1a2e,stroke:#00d9ff,color:#00d9ff
+    style D fill:#1a1a2e,stroke:#00d9ff,color:#00d9ff
+    style E fill:#1a1a2e,stroke:#ff6b6b,color:#ff6b6b
+    style A fill:#1a1a2e,stroke:#ff6b6b,color:#ff6b6b
+    style KW fill:#1a1a2e,stroke:#ffd93d,color:#ffd93d

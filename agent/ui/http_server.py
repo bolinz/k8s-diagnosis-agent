@@ -70,7 +70,7 @@ class AlertTaskManager:
             return dict(task)
 
     def shutdown(self) -> None:
-        self.executor.shutdown(wait=False, cancel_futures=False)
+        self.executor.shutdown(wait=False)
 
     def _run_task(self, request_id: str, payload: dict[str, Any]) -> None:
         with self._lock:

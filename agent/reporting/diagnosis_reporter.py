@@ -12,9 +12,11 @@ from agent.runtime_logging import get_logger, log_event
 
 try:
     from kubernetes import client, config
+    from kubernetes.client import ApiException
 except ImportError:  # pragma: no cover
     client = None
     config = None
+    ApiException = Exception
 
 
 def _iso(dt: datetime) -> str:
@@ -26,7 +28,7 @@ LOGGER = get_logger("report_writer")
 
 @dataclass
 class DiagnosisReportFormatter:
-    analysis_version: str = "0.6.0"
+    analysis_version: str = "0.7.0"
 
     def build_spec(
         self,
@@ -142,27 +144,22 @@ class KubernetesDiagnosisReportWriter:
             )
         }
         try:
-            self.custom.get_namespaced_custom_object(
+            self.custom.create_namespaced_custom_object(
                 group="ops.ai.yourorg",
                 version="v1alpha1",
                 namespace=namespace,
                 plural="diagnosisreports",
-                name=name,
+                body=body,
             )
+        except ApiException as exc:
+            if exc.status != 409:
+                raise
             self.custom.patch_namespaced_custom_object(
                 group="ops.ai.yourorg",
                 version="v1alpha1",
                 namespace=namespace,
                 plural="diagnosisreports",
                 name=name,
-                body=body,
-            )
-        except Exception:
-            self.custom.create_namespaced_custom_object(
-                group="ops.ai.yourorg",
-                version="v1alpha1",
-                namespace=namespace,
-                plural="diagnosisreports",
                 body=body,
             )
         result = self.custom.patch_namespaced_custom_object_status(

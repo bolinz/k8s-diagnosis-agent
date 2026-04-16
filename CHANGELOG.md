@@ -1,8 +1,10 @@
 # Changelog
 
-## v0.7.0 (Planned)
+## v0.7.0
 
-Release type: minor release focused on diagnosis breadth and operator maturity.
+Release type: minor capability release.
+
+Release focus: diagnosis breadth (6 new symptom types, batch aggregation) and operator maturity (OLM, Prometheus, health probes).
 
 ### Added
 
@@ -18,10 +20,44 @@ Release type: minor release focused on diagnosis breadth and operator maturity.
 - All metric names standardized to `k8s_diagnosis_` prefix (breaking change for existing Prometheus scrapers).
 - `agent/k8s_client/runtime.py` now uses `PolicyV1Api` for PDB collection; added PVC Pending, HPA MaxReplicas, and PDB DisruptionBlocked snapshot collectors.
 - `K8S_DIAGNOSIS_BATCH_THRESHOLD` env var added (default 5, set to 0 to disable).
+- `DiagnosisReport.status.analysisVersion` bumped to `0.7.0`.
 
-### Security
+### Fixed
 
-## v0.5.3 (Planned)
+- **evidenceTimeline reconstruction**: previously taken directly from model JSON output, which was unreliable (model often omitted events or hallucinated timestamps). Now extracts events from actual `get_pod_events`/`get_workload_events` tool outputs in `tool_history`, deduplicates by `(signal, kind, name, timestamp)`, sorts ascending, caps at 20 entries.
+- **tool_history leak**: `tool_history` is now cleared at `diagnose()` start, preventing stale events from prior calls from leaking into subsequent diagnoses.
+- **PVCPending phase lookup**: fixed `getattr`-on-string bug when constructing `message` from PVC phase.
+- **ResourceQuotaExceeded event filter**: removed invalid `field_selector` (`reason=FiredCreate` is not a standard K8s Event field); now uses in-code message filtering.
+
+## v0.6.0
+
+Release type: minor capability release.
+
+Release focus: diagnosis trustworthiness and explainability.
+
+### Added
+
+- Deterministic `qualityScore` object in `DiagnosisReport.status` with `overall` score, per-dimension scores (`evidence_coverage`, `recommendation_actionability`, `root_cause_strength`, `correlation_strength`, `confidence_alignment`), `method`, and `usedFallback` flag. Configurable via `agent/config/quality_scoring.yaml`.
+- `uncertainties: string[]` field for explicit operator caveats, generated for fallback and weak-evidence cases.
+- `evidenceAttribution: object[]` auto-populated from tool call sequence and timeline signals, mapping evidence items to source (tool, timestamp, signal, objectRef).
+- Rule-based fallback diagnosis engine externalized to `agent/config/fallback_rules.yaml` — 20 symptom types with severity, probable_causes, recommendations, and confidence.
+- Event-storm dedup state machine: tracks `count`, `first_seen`, `last_seen`, `aggregated` per event key; `mark_aggregated()` and `next_state()` methods.
+- Async event queue: `AsyncEventQueue` class with bounded worker pool and backpressure for decoupled event processing.
+
+### Architecture Refactoring
+
+- `AgentService` split into focused components: `EventWatcher`, `ReportWriter`, `TriggerTransformer`, `ToolExecutor`, `EventStormDeduper`, `AsyncEventQueue`.
+- `DiagnosisAgent.diagnose()` refactored to pure functional — returns `tuple[DiagnosisResult, list[ToolCallRecord]]` with local `tool_history` instead of mutating instance state.
+- `RuntimeKubernetesClient` split: tool implementations extracted to `agent/k8s_client/executor.py`; `RuntimeKubernetesClient` becomes facade delegating to `ToolExecutor`.
+- `KubernetesDiagnosisReportWriter.upsert_report()` race condition fixed: replaced `get`→`patch`/`create` TOCTOU pattern with atomic `create`→catch-409→`patch`.
+
+### Fixed
+
+- Fallback reports now always include non-empty `evidenceAttribution`.
+- Strict explainability checker now requires `analysisVersion` in `0.6.x` range.
+- Report normalization now sanitizes `rootCauseCandidates` against `relatedObjects` and primary workload.
+
+## v0.5.3
 
 Release type: patch release focused on report integrity fixes and CI/CD reliability improvements.
 

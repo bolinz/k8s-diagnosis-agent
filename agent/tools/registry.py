@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Dict
 
 from agent.k8s_client.base import KubernetesReadClient
 from agent.models import TriggerContext
 
 
-JSON = dict[str, Any]
+JSON = Dict[str, Any]
 ToolHandler = Callable[[JSON], JSON]
 
 

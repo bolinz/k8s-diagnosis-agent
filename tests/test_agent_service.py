@@ -796,7 +796,7 @@ def test_codex_agent_handles_function_call_then_structured_result():
         max_input_bytes=20000,
     )
     registry = ToolRegistry(client, trigger)
-    diagnosis = agent.diagnose(trigger, registry)
+    diagnosis, _ = agent.diagnose(trigger, registry)
     assert diagnosis.summary.startswith("Checkout pod crashes")
     assert diagnosis.confidence == 0.93
     assert client.calls[0][0] == "get_recent_logs"
@@ -836,7 +836,7 @@ def test_codex_agent_normalizes_string_fields_and_severity():
         max_tool_calls=8,
         max_input_bytes=20000,
     )
-    diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
+    diagnosis, _ = agent.diagnose(trigger, ToolRegistry(client, trigger))
     assert diagnosis.severity == "critical"
     assert diagnosis.probable_causes == ["Image tag does not exist in registry."]
     assert diagnosis.evidence == ["failed to pull image: manifest unknown"]
@@ -860,7 +860,7 @@ def test_codex_agent_falls_back_when_model_output_is_invalid():
         max_tool_calls=8,
         max_input_bytes=20000,
     )
-    diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
+    diagnosis, _ = agent.diagnose(trigger, ToolRegistry(client, trigger))
     assert diagnosis.used_fallback is True
     assert diagnosis.severity == "critical"
     assert diagnosis.raw_agent_output.get("trace", {}).get("fallbackReason") == "invalid_model_json"
@@ -899,7 +899,7 @@ def test_codex_agent_falls_back_when_diagnosis_time_budget_exceeded():
         max_input_bytes=20000,
         max_diagnosis_seconds=0,
     )
-    diagnosis = agent.diagnose(trigger, ToolRegistry(client, trigger))
+    diagnosis, _ = agent.diagnose(trigger, ToolRegistry(client, trigger))
     assert diagnosis.used_fallback is True
     assert diagnosis.severity == "critical"
 
@@ -1323,7 +1323,8 @@ def test_service_fills_empty_diagnosis_fields_from_fallback():
         max_input_bytes=20000,
     )
     service = AgentService(settings=settings, client=client, codex_agent=agent)
-    diagnosis = service._ensure_complete_diagnosis(trigger, agent.diagnose(trigger, ToolRegistry(client, trigger)))
+    agent_result, _ = agent.diagnose(trigger, ToolRegistry(client, trigger))
+    diagnosis = service._ensure_complete_diagnosis(trigger, agent_result)
     assert diagnosis.summary.startswith("Detected CrashLoopBackOff")
     assert diagnosis.evidence
     assert diagnosis.recommendations
@@ -1387,7 +1388,7 @@ def test_service_quality_score_prefers_richer_evidence_and_correlation():
     normalized = service._ensure_complete_diagnosis(trigger, diagnosis)
     quality = normalized.quality_score
     assert quality["usedFallback"] is False
-    assert quality["method"] == "rule-v1"
+    assert quality["method"] == "rule-v1-yaml"
     assert quality["overall"] >= 0.7
     assert quality["dimensions"]["evidenceCoverage"] == 1.0
     assert quality["dimensions"]["recommendationActionability"] == 1.0
@@ -2325,7 +2326,7 @@ def test_evidence_timeline_reconstructed_from_tool_history():
         max_input_bytes=20000,
     )
     registry = ToolRegistry(client, trigger)
-    diagnosis = agent.diagnose(trigger, registry)
+    diagnosis, _ = agent.diagnose(trigger, registry)
 
     # Verify tool was called
     assert client.calls[0][0] == "get_pod_events"
@@ -2409,7 +2410,7 @@ def test_evidence_timeline_deduplicates_events():
         max_input_bytes=20000,
     )
     registry = ToolRegistry(client, trigger)
-    diagnosis = agent.diagnose(trigger, registry)
+    diagnosis, _ = agent.diagnose(trigger, registry)
 
     # Duplicate should be deduplicated to 1 entry
     assert len(diagnosis.evidence_timeline) == 1
@@ -2491,15 +2492,13 @@ def test_tool_history_cleared_between_diagnoses():
     registry = ToolRegistry(client, trigger)
 
     # First diagnosis
-    diagnosis1 = agent.diagnose(trigger, registry)
-    first_history_len = len(agent.tool_history)
-    assert first_history_len > 0, "tool_history should be populated after first diagnose"
+    diagnosis1, history1 = agent.diagnose(trigger, registry)
+    assert len(history1) > 0, "tool_history should be populated after first diagnose"
 
-    # Second diagnosis should have fresh tool_history (cleared at start of diagnose)
-    diagnosis2 = agent.diagnose(trigger, registry)
-    # If tool_history was NOT cleared, it would accumulate: 2 + new calls
-    # With clear(), each diagnose starts fresh (2 calls per diagnose)
-    assert len(agent.tool_history) == first_history_len, (
-        f"tool_history should be {first_history_len} after second diagnose, "
-        f"got {len(agent.tool_history)} — tool_history was NOT cleared between calls"
+    # Second diagnosis should have fresh tool_history (each call is independent)
+    diagnosis2, history2 = agent.diagnose(trigger, registry)
+    # Each diagnose() call should start with fresh history, not accumulated
+    assert len(history2) == len(history1), (
+        f"tool_history should be {len(history1)} after second diagnose, "
+        f"got {len(history2)} — tool_history was NOT independent between calls"
     )
